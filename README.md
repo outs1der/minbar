@@ -19,7 +19,7 @@
 #!python
 
 import minbar
-mb = minbar.Minbar() # Load the burst database
+mb = minbar.Bursts() # Load the burst database
 mb.select_like('1636') # Select a source using part of its name
 print mb.field_labels # See which fields are available
 time = mb['time'] # Get a field as a numpy array (automatically time-ordered)
@@ -27,7 +27,9 @@ flux = mb['pflux']*1e-9 # Flux in erg/s/cm2
 mb.create_distance_correction() # Include distance information from Sources()
 distance = mb['dist']
 luminosity = flux*mb['distcor'] # Luminosity in erg/s
-    
+pca = mb.instr_like('pca') # Get index array for bursts observed with PCA
+pca_luminosity = luminosity[pca] # Luminosity of PCA bursts
+
 mb.select_like('1826') # Replace selection by another source
 mb.select_all(['GS 1826-24', '4U 1636-536']) # Select multiple sources; requires exact names
 mb.clear() # Clear the selection so all sources are included
