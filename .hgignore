@@ -1,0 +1,9 @@
+# Add any directories, files, or patterns you don't want to be tracked by version control
+
+syntax: glob
+*.pyc
+*~
+
+# No data files, except placeholder.txt
+syntax: regexp
+^data/(?!placeholder.txt$)
