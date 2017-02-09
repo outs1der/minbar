@@ -418,16 +418,34 @@ class Sources:
             filename = self.get_default_path()
         self._f = fits.open(filename)
         self.field_names = [i.lower() for i in self._f[1].data.dtype.names]
+        self.field_labels = self._get_field_labels()
         self._fits_names = list(self.field_names) # Keep track of which fields are in fits file
         self.clear()
         self.dist, self.diste = self.get_distances()
         self.field_names += ['dist', 'diste']
+        self.field_labels['dist'] = 'Distance (kpc)'
+        self.field_labels['diste'] = 'Error on distance (kpc)'
     
     def get_default_path(self):
         """
         Return the default path of the source list
         """
         return os.path.join(os.path.dirname(__file__), 'data', 'minbar_sources.fits')
+    
+    def _get_field_labels(self):
+        """
+        Get the field labels from the comment fields in the fits header
+        """
+        header = self._f[1].header
+        columns = [field[5:] for field in header if field.startswith('TTYPE')]
+        field_labels = {}
+        for column in columns:
+            label = header.get('TCOMM'+column, header['TTYPE'+column])
+            unit = header.get('TUNIT'+column, '')
+            if unit:
+                label = '{} ({})'.format(label, unit)
+            field_labels[header['TTYPE'+column].lower()] = label
+        return field_labels
     
     def __len__(self):
         """
