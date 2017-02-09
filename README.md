@@ -9,5 +9,5 @@
 
 * Place the package in your python path, e.g., the site-packages directory.
 * Copy the MINBAR database files into the 'data' directory
-* Check __init__.py for instructions on usage.
+* Check `__init__.py` for instructions on usage.
 * All data are presented as numpy arrays, which allows for easy selection of subsets of the data and operations on such selections. See [this introduction](https://docs.scipy.org/doc/numpy-dev/user/quickstart.html) to get started.
