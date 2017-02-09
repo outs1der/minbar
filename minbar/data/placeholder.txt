@@ -1,0 +1,1 @@
+Place MINBAR data files in this directory.

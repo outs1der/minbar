@@ -3,7 +3,5 @@
 syntax: glob
 *.pyc
 *~
+data/*
 
-# No data files, except placeholder.txt
-syntax: regexp
-^data/(?!placeholder.txt$)
