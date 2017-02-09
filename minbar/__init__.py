@@ -1,6 +1,6 @@
 """
 Python class to easily extract information from MINBAR.
-Provides the burst catalog (Minbar), observation catalog (Observation),
+Provides the burst catalog (Bursts), observation catalog (Observations),
 and source catalog (Sources). See the doc strings of those classes
 for example usage.
 
@@ -44,14 +44,14 @@ UCXBS = ['4U 0513-40',
          '4U 2129+12',
          ]
 
-class Minbar(IDLDatabase):
+class Bursts(IDLDatabase):
     """
     Read the MINBAR IDL database and give access to its
     contents.
     
     Example usage:
     import minbar
-    mb = minbar.Minbar()
+    mb = minbar.Bursts()
     mb.select_like('1636') # Select a source using part of its name
     print mb.field_labels # See which fields are available
     time = mb['time'] # Get a field as a numpy array (automatically time-ordered)
@@ -72,9 +72,8 @@ class Minbar(IDLDatabase):
     
     def __init__(self, filename=None, type=1):
         """
-        Create a new Minbar instance using the data
-        from the minbar database.
-
+        Create a new Bursts instance using the data from the minbar database.
+        
         filename: path to the database files, excluding their extension.
                   By default the minbar database in the directory of this
                   script is used.
@@ -286,7 +285,7 @@ class Minbar(IDLDatabase):
             return self.get(self.get_error_name(field))
         else:
             return n.zeros(len(self.get(field)))
-
+    
     def get_error_name(self, field):
         """
         Return the name of the field containing the
@@ -370,7 +369,12 @@ class Minbar(IDLDatabase):
             self.exclude('4U 1746-37') # Possibly 2 sources
             self.exclude('EXO 1745-248') # Possibly Type II
 
-class Observations(Minbar):
+class Minbar(Bursts):
+    """
+    Bursts used to be called Minbar. This class is defined for backwards compatibility.
+    """
+            
+class Observations(Bursts):
     """
     Load MINBAR database of observations.
     """
