@@ -3,6 +3,7 @@
 ### python-minbar ###
 
 * Python package for reading MINBAR database files
+* Requires Python 2 or 3, NumPy, and Astropy
 * Compatible with MINBAR v0.9
 
 ### Getting Started ###
