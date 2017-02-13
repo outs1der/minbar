@@ -17,9 +17,6 @@ import os, re
 from astropy.io import fits
 import logging
 
-logger = logging.getLogger('minbar')
-logger.setLevel(logging.INFO)
-
 kpc = 3.086e21 # cm
 
 # List of ultra compacts from In 't Zand (2007) (1850-087 and 1905+000 no bursts in MINBAR)
@@ -43,6 +40,20 @@ UCXBS = ['4U 0513-40',
          'XB 1916-053',
          '4U 2129+12',
          ]
+
+def create_logger():
+    """
+    Create a logger instance where messages are sent
+    """
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(levelname)s:%(name)s:%(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    return logger
+
+logger = create_logger()
 
 class Bursts(IDLDatabase):
     """
@@ -388,7 +399,7 @@ class Observations(Bursts):
         """
         if filename==None:
             filename = self.get_default_path('minbar-obs')
-        Minbar.__init__(self, filename, type)
+        Bursts.__init__(self, filename, type)
 
     def __str__(self):
         """
