@@ -11,7 +11,7 @@ package.
 Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 """
 
-from idldatabase import IDLDatabase
+from .idldatabase import IDLDatabase
 import numpy as n
 import os, re
 from astropy.io import fits
@@ -46,11 +46,12 @@ def create_logger():
     Create a logger instance where messages are sent
     """
     logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(levelname)s:%(name)s:%(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    if not logger.handlers: # Check if created before, otherwise a reload will add handlers
+        logger.setLevel(logging.INFO)
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(levelname)s:%(name)s:%(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
     return logger
 
 logger = create_logger()
@@ -129,15 +130,16 @@ class Bursts(IDLDatabase):
         return names[ind]
     
     def get_name_like(self, name):
-	"""
-	Return a list of sources that have 'name' in their archive
-	identifier.
-	"""
-	selection = []
-	for i in self.names:
-		if i.find(name)>-1:
-			selection.append(i)
-	return selection
+        """
+        Return a list of sources that have 'name' in their archive
+        identifier.
+        """
+        name = name.encode('ascii') # For python3
+        selection = []
+        for i in self.names:
+            if i.find(name)>-1:
+                selection.append(i.decode('ascii'))
+        return selection
     
     def get_type(self):
         """
@@ -171,11 +173,12 @@ class Bursts(IDLDatabase):
         Set the selection to the source with given name.
         """
         self.name = name
+        name = name.encode('ascii') # For python3
         name = self._pad_name(name)
         self.selection = (self.records.field('name') == name)&self.get_type() # Match name and burst type
         self.time_order = n.argsort(self.records[self.selection].field(self.timefield))
         self.ind = n.where(self.selection)[0][self.time_order]
-        logger.info('Selected {} {}s from {}'.format(len(n.where(self.selection)[0]), self.entryname, name))
+        logger.info('Selected {} {}s from {}'.format(len(n.where(self.selection)[0]), self.entryname, self.name))
     
     def select_like(self, name):
         """
@@ -197,7 +200,7 @@ class Bursts(IDLDatabase):
         """
         selection = n.zeros_like(self.selection)
         for name in names:
-            name = self._pad_name(name)
+            name = self._pad_name(name).encode('ascii')
             selection = n.logical_or(selection, self.records.field('name') == name)
         self.selection = selection&self.get_type() # Only bursts of specified type
         self.time_order = n.argsort(self.records[self.selection].field(self.timefield))
@@ -208,11 +211,13 @@ class Bursts(IDLDatabase):
         """
         Removes source with given name from the current selection.
         """
+        name = name.encode('ascii') # For python 3
+        name = self._pad_name(name)
         selection = n.logical_not(self.records.field('name') == name)
         self.selection = n.logical_and(self.selection, selection)
         self.time_order = n.argsort(self.records[self.selection].field(self.timefield))
         self.ind = n.where(self.selection)[0][self.time_order]
-        logger.info('Selected {} {}s by excluding {}'.format(len(n.where(self.selection)[0]), self.entryname, name))
+        logger.info('Selected {} {}s by excluding {}'.format(len(n.where(self.selection)[0]), self.entryname, name.decode('ascii')))
     
     def exclude_like(self, name):
         """
@@ -486,18 +491,18 @@ class Sources:
         return self.get(field)
     
     def get_name_like(self, name):
-	"""
-	Return a list of source indices that have 'name' in their name or name_2 fields.
+        """
+        Return a list of source indices that have 'name' in their name or name_2 fields.
         Case insensitive.
-	"""
+        """
         name = name.lower()
-	selection = []
-	for i, (name1, name2) in enumerate(zip(self._f[1].data['name'], self._f[1].data['name_2'])):
+        selection = []
+        for i, (name1, name2) in enumerate(zip(self._f[1].data['name'], self._f[1].data['name_2'])):
             if name1.lower().find(name)>-1:
                 selection.append(i)
             elif name2.lower().find(name)>-1:
                 selection.append(i)
-	return n.array(selection)
+        return n.array(selection)
     
     def select_like(self, name):
         """

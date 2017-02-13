@@ -13,6 +13,7 @@
 import struct
 import numpy as n
 from numpy import rec
+import logging
 
 class IDLDatabase:
     """
@@ -65,7 +66,11 @@ class IDLDatabase:
         
         self.header_items = items
         self.field_names = [i[0].strip().lower() for i in items]
-        labels = [i[11].strip() for i in items]
+        if not isinstance(self.field_names[0], str):
+            self.field_names = [i.decode('ascii') for i in self.field_names] # Python 3 gives string as 'bytes': must cast to string for records
+
+        labels = [i[6].strip(b' \x00').decode('ascii') for i in items]
+        
         self.field_labels = dict(zip(self.field_names, labels))
         formats = [self.idl2py_format(i[10].strip()) for i in items]
         self.field_format = dict(zip(self.field_names, formats))
@@ -116,7 +121,7 @@ class IDLDatabase:
         # See if we need some padding at the end
         pad = (self.record_size - total)
         if pad<0:
-            print 'Sum of items is larger than record size?'
+            logging.warn('idldatabase:Sum of items is larger than record size?')
         elif pad>0:
             fmt += 'a%i'%pad
             fmt += ','
