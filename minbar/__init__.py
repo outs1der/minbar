@@ -319,7 +319,7 @@ class Bursts(IDLDatabase):
         if instrument in alias:
             instrument = alias[instrument]
         
-        return n.char.array(self['instr']).startswith(instrument)
+        return n.char.array(self['instr']).startswith(instrument.encode('ascii'))
     
     def create_distance_correction(self):
         """
