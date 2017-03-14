@@ -44,7 +44,7 @@ print mo.field_labels # See which fields are available
 
 ms = minbar.Sources() # Load the source database
 print ms.field_labels # Show available data fields
-ra = s['ra_obj'] # Right ascension for all sources
+ra = ms['ra_obj'] # Right ascension for all sources
 ms.select_like('1636') # Select a source using part of its name
 ra = ms['ra_obj'] # Right ascension for selected source only
 ms.clear() # Clear selection
