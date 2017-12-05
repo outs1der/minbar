@@ -50,3 +50,19 @@ ra = ms['ra_obj'] # Right ascension for selected source only
 ms.clear() # Clear selection
 # Note that Sources() does not have select_all() or exclude_like()
 ```
+
+### pandas ###
+
+[pandas](https://pandas.pydata.org/) is a data analysis library with many
+features. The Minbar databases can be loaded as pandas DataFrames:
+
+```
+#!python
+
+import minbar.to_pandas
+mb = minbar.to_pandas.load_bursts() # Create a DataFrame with burst data
+mo = minbar.to_pandas.load_observations()
+ms = minbar.to_pandas.load_sources()
+df = mb.get_source('1636') # Select a source using part of its name
+df = mb.get_instrument('pca') # Select an instrument ('pca', 'wfc', or 'jemx')
+```
