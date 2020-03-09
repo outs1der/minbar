@@ -393,6 +393,8 @@ def findburst(_time, _rate, _error=None, tunit=None,
     csig=(c-ctest_m)/ctest_s
     cexc=np.where(csig > sigthresh)[0]
     if len(cexc) == 0:
+
+        # No bursts
         return None
 
 # Define an array giving the start and end indices for each region
@@ -402,16 +404,22 @@ def findburst(_time, _rate, _error=None, tunit=None,
     t_cand_ind=gtiseg(time[cexc], maxgap=1.05*min_burst_sep/md)#,indices=t_cand_ind)
     t_cand_ind=cexc[t_cand_ind]
     # print (t_cand_ind,np.shape(t_cand_ind))
+    # print (len(time),len(c))
 
+    # And finally assemble the list of start times, best estimates as the 
+    # time at which the cross-correlation is maximum, less the window
+    # offset and the rise time
+
+    t_cand = [time[x[0]+np.argmax(c[x[0]:x[1]])] for x in t_cand_ind]+fwin[0]-rise/sd
     if not fit:
-        return time[t_cand_ind[:,0]]
+        # return time[t_cand_ind[:,0]]-fwin[0]
+        return t_cand
     else:
 
         # Now set up the result arrays, based on the number of contiguous regions
         # exceeding the search threshold, identified in the previous step
 
         ncand=len(t_cand_ind)
-        t_cand = np.zeros(ncand)
         param = np.zeros((ncand,6))
         sig = np.zeros(ncand)
         result = -1     # originally the fits for each burst; not currently used
@@ -422,11 +430,14 @@ def findburst(_time, _rate, _error=None, tunit=None,
 
 # Calculate peak intensity in the window over which the significance
 # exceeds the threshold
+# Initial estimate of t_cand is probably sufficiently good
 
-            p=max(rate[t_cand_ind[0,i]:t_cand_ind[1,i]],ipmax)
-            ipmax += t_cand_ind[0,i]      # note ipmax is a pointer into time, not win
-            pe=error[ipmax]
-            t_cand[i]=time[ipmax]
+            ipmax = np.argmax(rate[t_cand_ind[i,0]:t_cand_ind[i,1]])+t_cand_ind[i,0]
+            # p=max(rate[t_cand_ind[0,i]:t_cand_ind[1,i]],ipmax)
+            # ipmax += t_cand_ind[0,i]      # note ipmax is a pointer into time, not win
+            # pe=error[ipmax]
+            p, pe = rate[ipmax], error[ipmax]
+            # t_cand[i]=time[ipmax]
             sig[i]=max(csig[t_cand_ind[0,i]:t_cand_ind[1,i]])
 
 # Now determine the window over which to do the fitting. This has a
