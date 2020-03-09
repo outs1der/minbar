@@ -13,6 +13,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 """
 
 from .idldatabase import IDLDatabase
+from .analyse import *
 import numpy as np
 import os, re
 from astropy.io import fits

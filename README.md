@@ -18,6 +18,21 @@ and the online data table repository at https://doi.org/10.26180/5e4a697d9b8b6
 
 ### Example Usage ###
 
+Below are some basic examples to analyse some X-ray data and search for bursts
+
+```
+import minbar
+from astropy.io import fits
+
+file = '../xmm/data/1RXSJ180408.9-342058/0741620101/2to7good.fits'
+hdul = fits.open(file)
+data = hdul[1].data
+test = minbar.findburst(data['TIME'], data['RATE'], data['ERROR'])
+print(test)
+[5.42058957e+08 5.42067368e+08 5.42075296e+08 5.42083081e+08
+ 5.42090903e+08]
+```
+
 The examples below originally utilised the IDL database files, and may not yet be implemented with the MRT tables.
 
 ```
