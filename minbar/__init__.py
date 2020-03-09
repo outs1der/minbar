@@ -8,19 +8,24 @@ The data files should be placed in the 'data' subdirectory of this
 package.
 
 (c) 2007, Laurens Keek, l.keek@sron.nl
+Updated for MINBAR DR1, 2020, Duncan Galloway, duncan.galloway@monash.edu
 Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 """
 
 from .idldatabase import IDLDatabase
-import numpy as n
+import numpy as np
 import os, re
 from astropy.io import fits
+from astropy.io import ascii
+import astropy.units as u
 import logging
 
-kpc = 3.086e21 # cm
+# kpc = 3.086e21 # cm
+kpc = u.kpc.to('cm') # cm
 
 # List of ultra compacts from In 't Zand (2007) (1850-087 and 1905+000 no bursts in MINBAR)
 # Includes all candidates. Should I add 1728?
+# Should generate this list dynamically based on the type code --- dkg
 UCXBS = ['4U 0513-40',
          '4U 0614+09',
          '2S 0918-549',
@@ -56,7 +61,85 @@ def create_logger():
 
 logger = create_logger()
 
-class Bursts(IDLDatabase):
+
+class Minbar(IDLDatabase):
+    """
+    This class is provided to access EITHER the IDL database or the information via the MRT tables
+    """
+
+    def __init__(self, filename=None, IDL=False):
+
+        if filename==None:
+            # If no filename specified, then choose the bursts
+            filename = self.get_default_path('minbar')
+            if not IDL:
+                filename += '.txt'
+
+        if IDL:
+            # Read in the IDL version of the database
+            IDLDatabase.__init__(self, filename)
+
+            self.fix_labels()
+
+        else:
+            # read in the MRT version, and fake the rest of the attributes; need to return
+            # a recarray, as described here:
+            #   https://docs.scipy.org/doc/numpy/reference/generated/numpy.recarray.html
+            # attributes to generate:
+            #   field_labels - dictionary of names, descriptions
+            #   field_names - just the field names
+            #   field_format - not used
+
+            data = ascii.read(filename)
+            # Cannot for the life of me work out how to change this column to a byte array, so
+            # just have to work around it in get_name_like etc.
+            # data['name'] = [x.encode('ascii') for x in data['name']]
+            self.records = data
+
+            self.field_names = data.colnames
+            info = data.info(out=None)
+            self.field_labels = dict(zip(self.field_names, info['description']))
+
+        # Keep the flag so we know what kind of data we're using
+        self.IDL = IDL
+
+        # Generate the list of names
+        self.names = self.get_names()
+
+    def fix_labels(self):
+        """
+        Fix the whitespace in the labels when reading in the IDL version.
+        """
+        pat = re.compile('\s+')
+        for k in self.field_labels:
+            self.field_labels[k] = re.sub(pat, ' ', self.field_labels[k])
+
+    def get_names(self):
+        """
+        Get a list of all source names in the archive. Ordered by right ascension.
+        RA is not a part of the MRT tables, so can only do this with the IDL version.
+        Should really replace with a read of the FITS table, which is the definitive
+        version
+        """
+        names = np.unique(self.records.field('name'))
+
+        if self.IDL:
+            ra = np.array([self.records.field('ra')[self.records.field('name') == name][0] for name in names])
+            ind = np.argsort(ra)
+
+            return names[ind]
+
+        return names
+
+    def get_default_path(self, filename):
+        """
+        Return the default path of the minbar data files with prefix
+        filename
+        """
+        return os.path.join(os.path.dirname(__file__), 'data', filename)
+
+
+class Bursts(Minbar):
     """
     Read the MINBAR IDL database and give access to its
     contents.
@@ -82,7 +165,7 @@ class Bursts(IDLDatabase):
     timefield = 'time' # The field used for determining time order
     entryname = 'burst'
     
-    def __init__(self, filename=None, type=1):
+    def __init__(self, filename=None, type=1, IDL=False):
         """
         Create a new Bursts instance using the data from the minbar database.
         
@@ -92,53 +175,31 @@ class Bursts(IDLDatabase):
         type: burst type. The default, 1, selects all vetted Type I bursts. Setting it
               to None means no type is selected.
         """
-        if filename==None:
-            filename = self.get_default_path('minbar')
-        IDLDatabase.__init__(self, filename)
-        
-        self.fix_labels()
-        
-        self.names = self.get_names()
-        self.type = type
+
+        # IDLDatabase.__init__(self, filename)
+        Minbar.__init__(self, filename, IDL=IDL)
+
+        if IDL:
+            self.type = type
+        else:
+            self.type = None
         self.clear()
-    
-    def get_default_path(self, filename):
-        """
-        Return the default path of the minbar data files with prefix
-        filename
-        """
-        return os.path.join(os.path.dirname(__file__), 'data', filename)
-    
-    def fix_labels(self):
-        """
-        Fix the whitespace in the labels.
-        """
-        pat = re.compile('\s+')
-        for k in self.field_labels:
-            self.field_labels[k] = re.sub(pat, ' ', self.field_labels[k])
-    
-    def get_names(self):
-        """
-        Get a list of all source names in the archive. Ordered by right
-        ascension.
-        """
-        names = n.unique(self.records.field('name'))
-        
-        ra = n.array([self.records.field('ra')[self.records.field('name')==name][0] for name in names])
-        ind = n.argsort(ra)
-        
-        return names[ind]
+
     
     def get_name_like(self, name):
         """
         Return a list of sources that have 'name' in their archive
         identifier.
         """
-        name = name.encode('ascii') # For python3
+        if self.IDL:
+            name = name.encode('ascii') # For python3
         selection = []
         for i in self.names:
             if i.find(name)>-1:
-                selection.append(i.decode('ascii'))
+                if self.IDL:
+                    selection.append(i.decode('ascii'))
+                else:
+                    selection.append(i)
         return selection
     
     def get_type(self):
@@ -146,7 +207,7 @@ class Bursts(IDLDatabase):
         Return an index array selecting the specified burst type (self.type).
         """
         if self.type==None:
-            return n.ones(len(self.records), n.bool)
+            return np.ones(len(self.records), np.bool)
         else:
             return self.records.field('type')==self.type
     
@@ -157,8 +218,8 @@ class Bursts(IDLDatabase):
         """
         self.name = ''
         self.selection = self.get_type()
-        self.time_order = n.argsort(self.records[self.selection].field(self.timefield))
-        self.ind = n.where(self.selection)[0][self.time_order]
+        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
+        self.ind = np.where(self.selection)[0][self.time_order]
 
     def _pad_name(self, name):
         """
@@ -173,12 +234,13 @@ class Bursts(IDLDatabase):
         Set the selection to the source with given name.
         """
         self.name = name
-        name = name.encode('ascii') # For python3
-        name = self._pad_name(name)
+        if self.IDL:
+            name = name.encode('ascii') # For python3
+            name = self._pad_name(name)
         self.selection = (self.records.field('name') == name)&self.get_type() # Match name and burst type
-        self.time_order = n.argsort(self.records[self.selection].field(self.timefield))
-        self.ind = n.where(self.selection)[0][self.time_order]
-        logger.info('Selected {} {}s from {}'.format(len(n.where(self.selection)[0]), self.entryname, self.name))
+        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
+        self.ind = np.where(self.selection)[0][self.time_order]
+        logger.info('Selected {} {}s from {}'.format(len(np.where(self.selection)[0]), self.entryname, self.name))
     
     def select_like(self, name):
         """
@@ -198,26 +260,29 @@ class Bursts(IDLDatabase):
         """
         Select multiple sources with given names.
         """
-        selection = n.zeros_like(self.selection)
+        selection = np.zeros_like(self.selection)
         for name in names:
-            name = self._pad_name(name).encode('ascii')
-            selection = n.logical_or(selection, self.records.field('name') == name)
+            if self.IDL:
+                name = self._pad_name(name)
+                name = name.encode('ascii')
+            selection = np.logical_or(selection, self.records.field('name') == name)
         self.selection = selection&self.get_type() # Only bursts of specified type
-        self.time_order = n.argsort(self.records[self.selection].field(self.timefield))
-        self.ind = n.where(self.selection)[0][self.time_order]
-        logger.info('Selected {} {}s'.format(len(n.where(self.selection)[0]), self.entryname))
+        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
+        self.ind = np.where(self.selection)[0][self.time_order]
+        logger.info('Selected {} {}s'.format(len(np.where(self.selection)[0]), self.entryname))
     
     def exclude(self, name):
         """
         Removes source with given name from the current selection.
         """
-        name = name.encode('ascii') # For python 3
-        name = self._pad_name(name)
-        selection = n.logical_not(self.records.field('name') == name)
-        self.selection = n.logical_and(self.selection, selection)
-        self.time_order = n.argsort(self.records[self.selection].field(self.timefield))
-        self.ind = n.where(self.selection)[0][self.time_order]
-        logger.info('Selected {} {}s by excluding {}'.format(len(n.where(self.selection)[0]), self.entryname, name.decode('ascii')))
+        if self.IDL:
+            name = name.encode('ascii') # For python 3
+            name = self._pad_name(name)
+        selection = np.logical_not(self.records.field('name') == name)
+        self.selection = np.logical_and(self.selection, selection)
+        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
+        self.ind = np.where(self.selection)[0][self.time_order]
+        logger.info('Selected {} {}s by excluding {}'.format(len(np.where(self.selection)[0]), self.entryname, name.decode('ascii')))
     
     def exclude_like(self, name):
         """
@@ -300,7 +365,7 @@ class Bursts(IDLDatabase):
         if self.has_error(field):
             return self.get(self.get_error_name(field))
         else:
-            return n.zeros(len(self.get(field)))
+            return np.zeros(len(self.get(field)))
     
     def get_error_name(self, field):
         """
@@ -319,7 +384,7 @@ class Bursts(IDLDatabase):
         if instrument in alias:
             instrument = alias[instrument]
         
-        return n.char.array(self['instr']).startswith(instrument.encode('ascii'))
+        return np.char.array(self['instr']).startswith(instrument.encode('ascii'))
     
     def create_distance_correction(self):
         """
@@ -331,10 +396,10 @@ class Bursts(IDLDatabase):
         distcor, distcore, dist, diste.
         """
         s = Sources()
-        dist = n.zeros(len(self.records))
-        diste = n.zeros_like(dist)
-        cor = n.zeros_like(dist)
-        core = n.zeros_like(dist)
+        dist = np.zeros(len(self.records))
+        diste = np.zeros_like(dist)
+        cor = np.zeros_like(dist)
+        core = np.zeros_like(dist)
         
         names = self.records.field('name')
         for name in self.names:
@@ -345,7 +410,7 @@ class Bursts(IDLDatabase):
                 diste[ind] = s['diste']
             s.clear()
         
-        cor = 4*n.pi*(dist*kpc)**2
+        cor = 4*np.pi*(dist*kpc)**2
         ind = dist>0.0 # Prevent division by 0 in next line
         core[ind] = cor[ind]*2.0*diste[ind]/dist[ind]
         
@@ -385,11 +450,6 @@ class Bursts(IDLDatabase):
             self.exclude('4U 1746-37') # Possibly 2 sources
             self.exclude('EXO 1745-248') # Possibly Type II
 
-class Minbar(Bursts):
-    """
-    Bursts used to be called Minbar. This class is defined for backwards compatibility.
-    """
-            
 class Observations(Bursts):
     """
     Load MINBAR database of observations.
@@ -502,7 +562,7 @@ class Sources:
                 selection.append(i)
             elif name2.lower().find(name)>-1:
                 selection.append(i)
-        return n.array(selection)
+        return np.array(selection)
     
     def select_like(self, name):
         """
@@ -611,8 +671,8 @@ class Sources:
                      'GX 13+1': (7.0, 0), # Christian & Swank 1997
                      }
         
-        dist = n.zeros_like(self['ra_obj'])
-        diste = n.zeros_like(dist)
+        dist = np.zeros_like(self['ra_obj'])
+        diste = np.zeros_like(dist)
         for i, name in enumerate(self['name']):
             if name in distances:
                 dist[i] = distances[name][0]

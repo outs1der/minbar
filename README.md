@@ -2,19 +2,23 @@
 
 ### python-minbar ###
 
-* Python package for reading MINBAR database files
+* Python package for analysing observational data of thermonuclear (type-I) X-ray bursts
+* Includes code to update and extend the MINBAR sample; see https://arxiv.org/abs/2003.00685 
+and the online data table repository at https://doi.org/10.26180/5e4a697d9b8b6
+* Also provides facilities for reading MINBAR IDL database files (not released publicly)
 * Requires Python 2 or 3, NumPy, and Astropy
-* Compatible with MINBAR v0.9
+* Compatible with MINBAR data release 1
 
 ### Getting Started ###
 
 * Place the `minbar` directory in your python path, e.g., the `site-packages` directory.
-* Copy the MINBAR database files into the `data` directory.
+* Copy the MINBAR database files (normally this would be the MRT tables) into the `data` directory.
 * Start python and `import minbar`. Check `__init__.py` for instructions on usage.
 * All data are presented as numpy arrays, which allows for easy selection of subsets of the data and operations on such selections. See [this introduction](https://docs.scipy.org/doc/numpy-dev/user/quickstart.html) to get started.
 
 ### Example Usage ###
 
+The examples below originally utilised the IDL database files, and may not yet be implemented with the MRT tables.
 
 ```
 #!python
@@ -22,7 +26,7 @@
 import minbar
 mb = minbar.Bursts() # Load the burst database
 mb.select_like('1636') # Select a source using part of its name
-print mb.field_labels # See which fields are available
+print (mb.field_labels) # See which fields are available
 time = mb['time'] # Get a field as a numpy array (automatically time-ordered)
 flux = mb['pflux']*1e-9 # Flux in erg/s/cm2
 mb.create_distance_correction() # Include distance information from Sources()
