@@ -66,7 +66,14 @@ logger = create_logger()
 class Minbar(IDLDatabase):
     """
     This class is provided to access EITHER the IDL database or the information via the MRT tables
+    Gradually moving the methods from the Burst class here, so they can also be used by the
+    Observations class
     """
+
+    # Local paths for MINBAR data
+
+    MINBAR_ROOT = '/Users/Shared/burst/minbar'
+    MINBAR_INSTR_PATH = {'XP': '', 'SW': 'wfc', 'IJ': 'jemx'}
 
     def __init__(self, filename=None, IDL=False):
 
@@ -139,6 +146,31 @@ class Minbar(IDLDatabase):
         """
         return os.path.join(os.path.dirname(__file__), 'data', filename)
 
+    def __len__(self):
+        """
+        Return the number of entries in the current selection.
+        """
+        return len(self.ind)
+
+    def get_type(self):
+        """
+        Return an index array selecting the specified burst type (self.type).
+        """
+        if self.type == None:
+            return np.ones(len(self.records), np.bool)
+        else:
+            return self.records.field('type') == self.type
+
+    def clear(self):
+        """
+        Clear the selection. If self.type is not None, only bursts of the given
+        type are selected.
+        """
+        self.name = ''
+        self.selection = self.get_type()
+        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
+        self.ind = np.where(self.selection)[0][self.time_order]
+
 
 class Bursts(Minbar):
     """
@@ -203,25 +235,6 @@ class Bursts(Minbar):
                     selection.append(i)
         return selection
     
-    def get_type(self):
-        """
-        Return an index array selecting the specified burst type (self.type).
-        """
-        if self.type==None:
-            return np.ones(len(self.records), np.bool)
-        else:
-            return self.records.field('type')==self.type
-    
-    def clear(self):
-        """
-        Clear the selection. If self.type is not None, only bursts of the given
-        type are selected.
-        """
-        self.name = ''
-        self.selection = self.get_type()
-        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
-        self.ind = np.where(self.selection)[0][self.time_order]
-
     def _pad_name(self, name):
         """
         Source names in records are padded with spaces. This routine pads with
@@ -319,12 +332,6 @@ class Bursts(Minbar):
         selected.
         """
         return self.records[self.selection][self.time_order]
-    
-    def __len__(self):
-        """
-        Return the number of entries in the current selection.
-        """
-        return len(self.ind)
     
     def __getitem__(self, field):
         """
@@ -451,7 +458,7 @@ class Bursts(Minbar):
             self.exclude('4U 1746-37') # Possibly 2 sources
             self.exclude('EXO 1745-248') # Possibly Type II
 
-class Observations(Bursts):
+class Observations(Minbar):
     """
     Load MINBAR database of observations.
     """
@@ -459,13 +466,40 @@ class Observations(Bursts):
     timefield = 'tstart' # The field used for determining time order
     entryname = 'observation'
     
-    def __init__(self, filename=None, type=None):
+    def __init__(self, filename=None, type=None, IDL=False):
         """
         Load the database of observations.
         """
         if filename==None:
             filename = self.get_default_path('minbar-obs')
-        Bursts.__init__(self, filename, type)
+
+            if not IDL:
+                filename += '.txt'
+
+        Minbar.__init__(self, filename, IDL=IDL)
+
+        self.type = type
+        self.clear()
+
+
+    def get_path(self, entry):
+        """
+        Return the path for MINBAR observations, assuming you have them stored locally
+        :param entry:
+        :return:
+        """
+
+        instr = self.records[entry]['instr'][0:2]
+        return self.MINBAR_ROOT+'/'+self.MINBAR_INSTR_PATH[instr]+'/data/'+self.records[entry]['name'].replace(" ","")
+
+
+    def get_lc(self, entry):
+        """
+        Return the lightcurve for a particular observation
+        :param entry:
+        :return:
+        """
+        pass
 
     def __str__(self):
         """
