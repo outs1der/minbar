@@ -73,7 +73,7 @@ class Minbar(IDLDatabase):
     # Local paths for MINBAR data
 
     MINBAR_ROOT = '/Users/Shared/burst/minbar'
-    MINBAR_INSTR_PATH = {'XP': '', 'SW': 'wfc', 'IJ': 'jemx'}
+    MINBAR_INSTR_PATH = {'XP': 'xte', 'SW': 'wfc', 'IJ': 'jemx'}
 
     def __init__(self, filename=None, IDL=False):
 
@@ -172,6 +172,111 @@ class Minbar(IDLDatabase):
         self.ind = np.where(self.selection)[0][self.time_order]
 
 
+    def select(self, name):
+        """
+        Set the selection to the source with given name.
+        """
+        self.name = name
+        if self.IDL:
+            name = name.encode('ascii')  # For python3
+            name = self._pad_name(name)
+        self.selection = (self.records.field('name') == name) & self.get_type()  # Match name and burst type
+        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
+        self.ind = np.where(self.selection)[0][self.time_order]
+        logger.info('Selected {} {}s from {}'.format(len(np.where(self.selection)[0]), self.entryname, self.name))
+
+
+    def name_like(self, name):
+        """
+        Like select, but get the name from get_name_like().
+        If multiple names are found, the first is selected
+        and the rest are reported.
+        """
+        names = self.get_name_like(name)
+        if not names:
+            logger.info('No matching source')
+        else:
+            self.select(names[0])
+            if len(names) > 1:
+                logger.info('{} more matching sources: {}'.format(len(names) - 1, ', '.join(names[1:])))
+
+
+    def get_name_like(self, name):
+        """
+        Return a list of sources that have 'name' in their archive
+        identifier.
+        """
+        if self.IDL:
+            name = name.encode('ascii')  # For python3
+        selection = []
+        for i in self.names:
+            if i.find(name) > -1:
+                if self.IDL:
+                    selection.append(i.decode('ascii'))
+                else:
+                    selection.append(i)
+        return selection
+
+
+    def _pad_name(self, name):
+        """
+        Source names in records are padded with spaces. This routine pads with
+        given name with spaces for comparison to the records.
+        """
+        size = self.records['name'].dtype.itemsize
+        return name.ljust(size)
+
+
+    def get(self, field):
+        """
+        Get the field as a numpy array while applying the
+        current (source) selection and time ordering the
+        result.
+        Modified to allow getting data from an attribute, if it is
+        not available in the standard database.
+        """
+        if field in self.field_names:
+            return self.get_records().field(field)
+        else:
+            return getattr(self, field)[self.ind]
+
+
+    def get_records(self):
+        """
+        Get the time ordered records that are currently
+        selected.
+        """
+        return self.records[self.selection][self.time_order]
+
+
+    def __getitem__(self, field):
+        """
+        Shorthand for get().
+        Expand the usage here to also return the item with the entry number
+        """
+
+        if type(field) == str:
+            return self.get(field)
+
+        return self.records[self.records['entry'] == field]
+
+
+    def instr_like(self, instrument):
+        """
+        Return an array that selects all entries where the instrument name
+        begins with the given instrument string. E.g., 'XP' for PCA. For convenience,
+        the following aliases are provided: 'pca', 'wfc', 'jemx'.
+        """
+        alias = {'pca': 'XP', 'wfc': 'SW', 'jemx': 'IJ'}
+        if instrument in alias:
+            instrument = alias[instrument]
+
+        if self.IDL:
+            instrument = instrument.encode('ascii')
+
+        return np.char.array(self['instr']).startswith(instrument)
+
+
 class Bursts(Minbar):
     """
     Read the MINBAR IDL database and give access to its
@@ -180,7 +285,7 @@ class Bursts(Minbar):
     Example usage:
     import minbar
     mb = minbar.Bursts()
-    mb.select_like('1636') # Select a source using part of its name
+    mb.name_like('1636') # Select a source using part of its name
     print mb.field_labels # See which fields are available
     time = mb['time'] # Get a field as a numpy array (automatically time-ordered)
     flux = mb['pflux']*1e-9 # Flux in erg/s/cm2
@@ -188,7 +293,7 @@ class Bursts(Minbar):
     distance = mb['dist']
     luminosity = flux*mb['distcor'] # Luminosity in erg/s
     
-    mb.select_like('1826') # Replace selection by another source
+    mb.name_like('1826') # Replace selection by another source
     mb.select_all(['GS 1826-24', '4U 1636-536']) # Select multiple sources; requires exact names
     mb.clear() # Clear the selection so all sources are included
     mb.exclude_like('1636') # Exclude source from selection
@@ -218,57 +323,6 @@ class Bursts(Minbar):
             self.type = None
         self.clear()
 
-    
-    def get_name_like(self, name):
-        """
-        Return a list of sources that have 'name' in their archive
-        identifier.
-        """
-        if self.IDL:
-            name = name.encode('ascii') # For python3
-        selection = []
-        for i in self.names:
-            if i.find(name)>-1:
-                if self.IDL:
-                    selection.append(i.decode('ascii'))
-                else:
-                    selection.append(i)
-        return selection
-    
-    def _pad_name(self, name):
-        """
-        Source names in records are padded with spaces. This routine pads with
-        given name with spaces for comparison to the records.
-        """
-        size = self.records['name'].dtype.itemsize
-        return name.ljust(size)
-    
-    def select(self, name):
-        """
-        Set the selection to the source with given name.
-        """
-        self.name = name
-        if self.IDL:
-            name = name.encode('ascii') # For python3
-            name = self._pad_name(name)
-        self.selection = (self.records.field('name') == name)&self.get_type() # Match name and burst type
-        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
-        self.ind = np.where(self.selection)[0][self.time_order]
-        logger.info('Selected {} {}s from {}'.format(len(np.where(self.selection)[0]), self.entryname, self.name))
-    
-    def select_like(self, name):
-        """
-        Like select, but get the name from get_name_like().
-        If multiple names are found, the first is selected
-        and the rest are reported.
-        """
-        names = self.get_name_like(name)
-        if not names:
-            logger.info('No matching source')
-        else:
-            self.select(names[0])
-            if len(names)>1:
-                logger.info('{} more matching sources: {}'.format(len(names) - 1, ', '.join(names[1:])))
     
     def select_all(self, names):
         """
@@ -313,32 +367,6 @@ class Bursts(Minbar):
             if len(names)>1:
                 logger.info('{} more matching sources: {}'.format(len(names) - 1, ', '.join(names[1:])))
     
-    def get(self, field):
-        """
-        Get the field as a numpy array while applying the
-        current (source) selection and time ordering the
-        result.
-        Modified to allow getting data from an attribute, if it is
-        not available in the standard database.
-        """
-        if field in self.field_names:
-            return self.get_records().field(field)
-        else:
-            return getattr(self, field)[self.ind]
-    
-    def get_records(self):
-        """
-        Get the time ordered records that are currently
-        selected.
-        """
-        return self.records[self.selection][self.time_order]
-    
-    def __getitem__(self, field):
-        """
-        Shorthand for get().
-        """
-        return self.get(field)
-    
     def __str__(self):
         """
         Return a nice string.
@@ -382,18 +410,6 @@ class Bursts(Minbar):
         """
         return field + 'e'
     
-    def instr_like(self, instrument):
-        """
-        Return an array that selects all entries where the instrument name
-        begins with the given instrument string. E.g., 'XP' for PCA. For convenience,
-        the following aliases are provided: 'pca', 'wfc', 'jemx'.
-        """
-        alias = {'pca': 'XP', 'wfc': 'SW', 'jemx': 'IJ'}
-        if instrument in alias:
-            instrument = alias[instrument]
-        
-        return np.char.array(self['instr']).startswith(instrument.encode('ascii'))
-    
     def create_distance_correction(self):
         """
         Create an array of distance corrections, 4 pi d^2, for each burst.
@@ -411,7 +427,7 @@ class Bursts(Minbar):
         
         names = self.records.field('name')
         for name in self.names:
-            s.select_like(name.strip())
+            s.name_like(name.strip())
             if s.selection!=None:
                 ind = names==name
                 dist[ind] = s['dist']
@@ -465,7 +481,8 @@ class Observations(Minbar):
     
     timefield = 'tstart' # The field used for determining time order
     entryname = 'observation'
-    
+
+
     def __init__(self, filename=None, type=None, IDL=False):
         """
         Load the database of observations.
@@ -489,17 +506,37 @@ class Observations(Minbar):
         :return:
         """
 
-        instr = self.records[entry]['instr'][0:2]
-        return self.MINBAR_ROOT+'/'+self.MINBAR_INSTR_PATH[instr]+'/data/'+self.records[entry]['name'].replace(" ","")
+        instr = self[entry]['instr'][0][0:2]
+        return '/'.join([self.MINBAR_ROOT, self.MINBAR_INSTR_PATH[instr],'data',
+                self[entry]['name'][0].replace(" ",""),
+                self[entry]['obsid'][0]])
 
 
     def get_lc(self, entry):
         """
-        Return the lightcurve for a particular observation
+        Return the lightcurve for a particular observation; this is a replacement for the IDL routine get_lc.pro
         :param entry:
         :return:
         """
-        pass
+
+        path = self.get_path(entry)
+        if self[entry]['instr'][0][0:2] == 'XP':
+            filename = 'stdprod/xp{}_n1.lc.gz'.format(self[entry]['obsid'][0].replace("-",""))
+        else:
+            print ("** WARNING ** other instruments not yet implemented")
+            return None
+
+        # print (path+'/'+filename)
+        lcfile = fits.open(path+'/'+filename)
+
+        lc = lcfile[1].data
+
+        lcfile.close()
+
+        # Can clean up the table here if necessary; i.e. create a Lightcurve
+        # object, adopt uniform time scale etc.
+
+        return lc
 
     def __str__(self):
         """
@@ -516,7 +553,7 @@ class Sources:
     s = Sources()
     print s.field_names # Show available data fields
     ra = s['ra_obj'] # Right ascension for all sources
-    s.select_like('1636')
+    s.name_like('1636')
     ra = s['ra_obj'] # Right ascension for selected source only
     s.clear() # Clear selection
     """
@@ -578,13 +615,15 @@ class Sources:
             return data
         else:
             return data[self.selection]
-    
+
+
     def __getitem__(self, field):
         """
         Return field with given name. See self.get().
         """
         return self.get(field)
-    
+
+
     def get_name_like(self, name):
         """
         Return a list of source indices that have 'name' in their name or name_2 fields.
@@ -599,7 +638,7 @@ class Sources:
                 selection.append(i)
         return np.array(selection)
     
-    def select_like(self, name):
+    def name_like(self, name):
         """
         Select the source with given name. Uses first result from self.get_name_like()
         """
