@@ -13,6 +13,7 @@
 import struct
 import numpy as n
 from numpy import rec
+from astropy.table import Table
 import logging
 
 class IDLDatabase:
@@ -92,11 +93,23 @@ class IDLDatabase:
         size = self.record_size
         
         file.seek(size)
+        # 'big' below corresponds to 'big-endian', character '>'
         records = rec.array(file, formats=fmt, shape=self.num_records,
                           names=self.field_names, byteorder='big')
-        
-        self.records = records
-    
+
+        # For consistency with the text input, we convert to an astropy Table here
+        # This step is primarily to allow the strings to be treated as strings (not
+        # byte arrays, as they are for the base rec.array)
+
+        self.records = Table(records)
+
+        # Also strip out the trailing spaces in the various strings
+
+        self.records['name'] = [x.strip() for x in self.records['name']]
+        self.records['obsid'] = [x.strip() for x in self.records['obsid']]
+        self.records['notes'] = [x.strip() for x in self.records['notes']]
+
+
     def create_format(self):
         """
         From the specification given in the header file,

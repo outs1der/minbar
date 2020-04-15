@@ -71,17 +71,21 @@ class Minbar(IDLDatabase):
     """
 
     # Local paths for MINBAR data
+    # Bytearr entries are for consistency between the IDL and ASCII
+    # versions of the data
 
     MINBAR_ROOT = '/Users/Shared/burst/minbar'
-    MINBAR_INSTR_PATH = {'XP': 'xte', 'SW': 'wfc', 'IJ': 'jemx'}
+    MINBAR_INSTR_PATH = {'XP': 'xte', 'SW': 'wfc', 'IJ': 'jemx',
+                        b'XP': 'xte', b'SW': 'wfc', b'IJ': 'jemx'}
 
     def __init__(self, filename=None, IDL=False):
 
         if filename==None:
             # If no filename specified, then choose the bursts
             filename = self.get_default_path('minbar')
-            if not IDL:
-                filename += '.txt'
+
+        if not IDL:
+            filename += '.txt'
 
         if IDL:
             # Read in the IDL version of the database
@@ -99,9 +103,8 @@ class Minbar(IDLDatabase):
             #   field_format - not used
 
             data = ascii.read(filename)
-            # Cannot for the life of me work out how to change this column to a byte array, so
-            # just have to work around it in get_name_like etc.
-            # data['name'] = [x.encode('ascii') for x in data['name']]
+            # astropy seems to treat bytes as str, so can't convert strings back to byte arrays
+            # for compatibility with the IDL version
             self.records = data
 
             self.field_names = data.colnames
@@ -177,9 +180,6 @@ class Minbar(IDLDatabase):
         Set the selection to the source with given name.
         """
         self.name = name
-        if self.IDL:
-            name = name.encode('ascii')  # For python3
-            name = self._pad_name(name)
         self.selection = (self.records.field('name') == name) & self.get_type()  # Match name and burst type
         self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
         self.ind = np.where(self.selection)[0][self.time_order]
@@ -206,15 +206,10 @@ class Minbar(IDLDatabase):
         Return a list of sources that have 'name' in their archive
         identifier.
         """
-        if self.IDL:
-            name = name.encode('ascii')  # For python3
         selection = []
         for i in self.names:
             if i.find(name) > -1:
-                if self.IDL:
-                    selection.append(i.decode('ascii'))
-                else:
-                    selection.append(i)
+                selection.append(i)
         return selection
 
 
@@ -270,9 +265,6 @@ class Minbar(IDLDatabase):
         alias = {'pca': 'XP', 'wfc': 'SW', 'jemx': 'IJ'}
         if instrument in alias:
             instrument = alias[instrument]
-
-        if self.IDL:
-            instrument = instrument.encode('ascii')
 
         return np.char.array(self['instr']).startswith(instrument)
 
@@ -330,9 +322,6 @@ class Bursts(Minbar):
         """
         selection = np.zeros_like(self.selection)
         for name in names:
-            if self.IDL:
-                name = self._pad_name(name)
-                name = name.encode('ascii')
             selection = np.logical_or(selection, self.records.field('name') == name)
         self.selection = selection&self.get_type() # Only bursts of specified type
         self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
@@ -343,14 +332,11 @@ class Bursts(Minbar):
         """
         Removes source with given name from the current selection.
         """
-        if self.IDL:
-            name = name.encode('ascii') # For python 3
-            name = self._pad_name(name)
         selection = np.logical_not(self.records.field('name') == name)
         self.selection = np.logical_and(self.selection, selection)
         self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
         self.ind = np.where(self.selection)[0][self.time_order]
-        logger.info('Selected {} {}s by excluding {}'.format(len(np.where(self.selection)[0]), self.entryname, name.decode('ascii')))
+        logger.info('Selected {} {}s by excluding {}'.format(len(np.where(self.selection)[0]), self.entryname, name))
     
     def exclude_like(self, name):
         """
@@ -490,9 +476,6 @@ class Observations(Minbar):
         if filename==None:
             filename = self.get_default_path('minbar-obs')
 
-            if not IDL:
-                filename += '.txt'
-
         Minbar.__init__(self, filename, IDL=IDL)
 
         self.type = type
@@ -520,7 +503,8 @@ class Observations(Minbar):
         """
 
         path = self.get_path(entry)
-        if self[entry]['instr'][0][0:2] == 'XP':
+        instr = self[entry]['instr'][0][0:2]
+        if instr == 'XP':
             filename = 'stdprod/xp{}_n1.lc.gz'.format(self[entry]['obsid'][0].replace("-",""))
         else:
             print ("** WARNING ** other instruments not yet implemented")
