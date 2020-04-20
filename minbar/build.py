@@ -35,42 +35,7 @@ import numpy as np
 # any instrument; need to pass only enough information e.g. lightcurve path(s), candidate
 # times, significance etc. to allow verification
 
-def verify_path(source, path, source_path):
-    """
-    Generic routine to verify the data path, and try to match up the source names with the
-    directories in the tree
-    :param path:
-    :param source_path:
-    :return:
-    """
-
-    has_dir = [False] * len(source)
-    nonmatched = 0
-    with os.scandir(path + '/data/') as entries:
-        for entry in entries:
-            if os.path.isdir(entry) and not (entry.name in source_path):
-                print("** WARNING ** possible non-compliant source path {}".format(entry.name))
-                nonmatched += 1
-            else:
-                # self.has_dir[self.source_path.index(entry.name)] = True
-                _i = np.where(source_path == entry.name)[0]
-                # print (entry.name,_i)
-                assert len(_i) <= 1
-                if len(_i) == 1:
-                    has_dir[_i[0]] = True
-
-    nmissing = len(np.where(np.logical_not(has_dir))[0])
-    if nonmatched > 0:  # or self.nmissing > 0:
-        print("""
-Possible inconsistencies in the directory tree; 
-  {} directories without source matches
-  {} sources without data directories
-You should check your source to directory name mapping""".format(nonmatched, nmissing))
-
-    return has_dir, nonmatched, nmissing
-
-
-def get_new(instr, ignore_unmatched=False):
+def get_new(instr, ignore_unmatched=False, sources=None):
     """
     Method to identify new observations to be analysed. Having defined an instrument, run
     newobs = instrument.get_new()
@@ -83,22 +48,38 @@ def get_new(instr, ignore_unmatched=False):
         print("** ERROR ** can't continue with unmatched observation directories")
         return
 
+    # Build the list of source names here
+
+    if sources is None:
+        # If you don't pass any sources, we'll do them all
+        sources=instr.source_name
+    else:
+        if isinstance(sources, str):
+            sources = [sources]
+
+        # Check the passed list of sources here
+        for source in list(sources):
+            if source not in instr.source_name:
+                print("** ERROR ** {} not present in source name list".format(source))
+                return None
+
     # Need to fix this hard-wired path prior to deployment, or allow the option to use
     # the text file instead
 
     obs_db = minbar.Observations('../minbar-obs')
 
     to_add = {}
-    for i, name in enumerate(instr.source_name):
+    for source in sources:
+        i = np.where(instr.source_name == source)[0][0]
         if instr.has_dir[i]:
-            print(name, instr.source_path[i])
+            print(source, instr.source_path[i])
 
             # Filter obs DB on source
 
             obs_db.clear()
-            obs_db.select_like(name)
-            # in_db = set([x.strip() for x in obs_db['obsid']])
-            in_db = set([x.strip().decode() for x in obs_db['obsid']])
+            obs_db.name_like(source)
+            in_db = set([x.strip() for x in obs_db['obsid']])
+            # in_db = set([x.strip().decode() for x in obs_db['obsid']])
 
             # Check if the observation is already present
 
@@ -108,9 +89,9 @@ def get_new(instr, ignore_unmatched=False):
 
             new = in_dir.difference(in_db)
             if len(new) > 0:
-                to_add[name] = new
+                to_add[source] = new
         else:
-            print("Skipping {}, no matching source directory".format(name))
+            print("Skipping {}, no matching source directory".format(source))
 
     return to_add
 
@@ -128,6 +109,7 @@ def analyse(instr, obs):
 
     # Create blank result tables here and populate them one by one
 
+    print ('analysing...')
     pers, bursts = [], []
     for src in obs.keys():
         for obsid in obs[src]:
@@ -183,88 +165,6 @@ def update(instr, obs):
     :return:
     """
     pass
-
-
-# Here's a generic instrument class which can be adapted and/or duplicated for different
-# instruments. This class is kept pretty lean to avoid having to replicate lots of code
-
-class Instrument:
-    """
-    Defines the properties of an instrument with data that we're going to analyse and add to MINBAR
-    Example
-    import minbar.build
-    jemx = minbar.build.Instrument('JEM-X', '../jemx', 'IJ')
-    """
-
-    INSTRUMENTS =['XP','SW','IJ']
-
-    def __init__(self, name, path, label,
-                 lightcurve=['lc1_3-25keV_1.0s.fits','lc2_3-25keV_1.0s.fits'],
-                 spectrum=None):
-
-        self.name = name
-        if os.path.isdir(path):
-            self.path = path
-        else:
-            sys.exit(1)
-        self.label = label
-        if label not in self.INSTRUMENTS:
-            print('** WARNING ** new instrument {} not fully implemented'.format(name))
-
-        # Define the paths corresponding to each source here
-        # Default is just the source name with spaces removed; this won't work for RXTE
-
-        self.source = minbar.Sources()
-        self.source_name = self.source['name']
-        self.source_path = self.source_name.replace(" ", "")
-        if self.label == 'IJ':
-            # for JEM-X, the convention is to also replace '+' with 'p'
-            self.source_path = self.source_name.replace("+","p")
-
-        # Define the lightcurve and spectral files
-
-        self.lightcurve = lightcurve
-        self.spectrum = spectrum
-
-        # Check that the directories in the data path all correspond to source_paths
-        # You don't want to miss observations in some directory because of inconsistencies
-        # with the directory names
-
-        self.has_dir, self.nonmatched, self.nmissing = verify_path(self.source, self.path, self.source_path)
-
-
-    def __str__(self):
-        """
-        Method to display information about this object
-        :return:
-        """
-
-        return """
-MINBAR instrument definition
-
-Name: {} ({})
-Data path: {}
-Lightcurve(s): {}
-Spectra: {}""".format(self.name, self.label, self.path, self.lightcurve, self.spectrum)
-
-
-    def analyse_persistent(self, src, obsid):
-        """
-        Function to analyse the persistent emission (lightcurve and spectrum) for a single
-        observation
-        :param src:
-        :param obsid:
-        :return:
-        """
-
-    def analyse_burst(self, bursts):
-        """
-        Function to analyse the persistent emission (lightcurve and spectrum) for a single
-        observation
-        :param src:
-        :param obsid:
-        :return:
-        """
 
 
 

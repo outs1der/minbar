@@ -20,9 +20,20 @@ from astropy.io import fits
 from astropy.io import ascii
 import astropy.units as u
 import logging
+import sys
 
 # kpc = 3.086e21 # cm
 kpc = u.kpc.to('cm') # cm
+
+# Local paths for MINBAR data
+# Bytearr entries are for consistency between the IDL and ASCII
+# versions of the data
+
+MINBAR_ROOT = '/Users/Shared/burst/minbar'
+MINBAR_INSTR_LABEL = {'PCA': 'XP', 'WFC': 'SW', 'JEM-X': 'IJ'}
+MINBAR_INSTR_PATH = {'XP': 'xte', 'SW': 'wfc', 'IJ': 'jemx',
+                     'PCA': 'xte', 'WFC': 'wfc', 'JEM-X': 'jemx',
+                     b'XP': 'xte', b'SW': 'wfc', b'IJ': 'jemx'}
 
 # List of ultra compacts from In 't Zand (2007) (1850-087 and 1905+000 no bursts in MINBAR)
 # Includes all candidates. Should I add 1728?
@@ -50,6 +61,7 @@ UCXBS = ['4U 0513-40',
 def create_logger():
     """
     Create a logger instance where messages are sent
+    See https://docs.python.org/3/library/logging.html
     """
     logger = logging.getLogger(__name__)
     if not logger.handlers: # Check if created before, otherwise a reload will add handlers
@@ -63,20 +75,47 @@ def create_logger():
 logger = create_logger()
 
 
+def verify_path(source, path, source_path):
+    """
+    Generic routine to verify the data path, and try to match up the source names with the
+    directories in the tree
+    :param path:
+    :param source_path:
+    :return:
+    """
+
+    has_dir = [False] * len(source)
+    nonmatched = 0
+    with os.scandir(path + '/data/') as entries:
+        for entry in entries:
+            if os.path.isdir(entry) and not (entry.name in source_path):
+                logger.warning("possible non-compliant source path {}".format(entry.name))
+                nonmatched += 1
+            else:
+                # self.has_dir[self.source_path.index(entry.name)] = True
+                _i = np.where(source_path == entry.name)[0]
+                # print (entry.name,_i)
+                assert len(_i) <= 1
+                if len(_i) == 1:
+                    has_dir[_i[0]] = True
+
+    nmissing = len(np.where(np.logical_not(has_dir))[0])
+    if nonmatched > 0:  # or self.nmissing > 0:
+        print("""
+Possible inconsistencies in the directory tree; 
+  {} directories without source matches
+  {} sources without data directories
+You should check your source to directory name mapping""".format(nonmatched, nmissing))
+
+    return has_dir, nonmatched, nmissing
+
+
 class Minbar(IDLDatabase):
     """
     This class is provided to access EITHER the IDL database or the information via the MRT tables
     Gradually moving the methods from the Burst class here, so they can also be used by the
     Observations class
     """
-
-    # Local paths for MINBAR data
-    # Bytearr entries are for consistency between the IDL and ASCII
-    # versions of the data
-
-    MINBAR_ROOT = '/Users/Shared/burst/minbar'
-    MINBAR_INSTR_PATH = {'XP': 'xte', 'SW': 'wfc', 'IJ': 'jemx',
-                        b'XP': 'xte', b'SW': 'wfc', b'IJ': 'jemx'}
 
     def __init__(self, filename=None, IDL=False):
 
@@ -266,7 +305,11 @@ class Minbar(IDLDatabase):
         if instrument in alias:
             instrument = alias[instrument]
 
-        return np.char.array(self['instr']).startswith(instrument)
+        # This is a crappy way to try to make things work with both strings and byte arrays
+        try:
+            return np.char.array(self['instr']).startswith(instrument)
+        except:
+            return np.char.array(self['instr']).startswith(instrument.encode('ascii'))
 
 
 class Bursts(Minbar):
@@ -460,6 +503,7 @@ class Bursts(Minbar):
             self.exclude('4U 1746-37') # Possibly 2 sources
             self.exclude('EXO 1745-248') # Possibly Type II
 
+
 class Observations(Minbar):
     """
     Load MINBAR database of observations.
@@ -507,7 +551,7 @@ class Observations(Minbar):
         if instr == 'XP':
             filename = 'stdprod/xp{}_n1.lc.gz'.format(self[entry]['obsid'][0].replace("-",""))
         else:
-            print ("** WARNING ** other instruments not yet implemented")
+            logger.warning("other instruments not yet implemented")
             return None
 
         # print (path+'/'+filename)
@@ -527,6 +571,37 @@ class Observations(Minbar):
         Return a nice string.
         """
         return "Multi-INstrument oBservation ARchive (MINBAR) ({} {}s from {} sources)".format(len(self.records), self.entryname, len(self.names))
+
+
+class Observation:
+    """
+    This object is intended to allow all the possible actions you might have on an
+    observation. You can create it from a minbar entry, or given an instrument, source name and obs ID
+    """
+
+
+    def __init__(self, obs_entry=None, instr=None, source=None, obsid=None):
+        """
+        Create an observation instanced, either from a MINBAR obs entry, or by-hand
+        :param obs_entry: 
+        :param instr: 
+        :param source: 
+        :param obsid: 
+        """
+
+        if obs_entry is not None:
+            logger.warning('not yet completely implemented')
+            # Really need to create an instrument here
+            label = [key for key, value in MINBAR_INSTR_LABEL.items() if value == obs_entry['instr'][:2]][0]
+            instr = Instrument(label)
+            source = obs_entry['name']
+            obsid = obs_entry['obsid']
+
+        self.instr = instr
+        self.source = source
+        self.obsid = obsid
+
+        # Read in the lightcurve
 
 class Sources:
     """
@@ -736,3 +811,101 @@ class Sources:
                 dist[i] = distances[name][0]
                 diste[i] = distances[name][1]
         return dist, diste
+
+
+class Instrument:
+    """
+    Here's a generic instrument class which can be adapted and/or duplicated for different
+    instruments. This class is kept pretty lean to avoid having to replicate lots of code
+    Defines the properties of an instrument with data that we're going to analyse and add to MINBAR
+    Example
+    import minbar
+    jemx = minbar.Instrument('JEM-X', '../jemx', 'IJ')
+    """
+
+    def __init__(self, name, path=None, label=None,
+                 lightcurve=['lc1_3-25keV_1.0s.fits','lc2_3-25keV_1.0s.fits'],
+                 spectrum=None):
+
+        self.name = name
+        if name in MINBAR_INSTR_LABEL.keys():
+            # These are the known MINBAR instruments
+            self.label = MINBAR_INSTR_LABEL[name]
+            if path is None:
+                path = '../'+MINBAR_INSTR_PATH[self.label]
+
+        else:
+            # all other instruments
+            if (label is None) or (path is None):
+                logger.error('for "new" instruments need to specify path and label')
+                return None
+            logger.warning('new instrument {} may not be fully implemented'.format(name))
+            self.label = label
+
+        if os.path.isdir(path):
+            self.path = path
+        else:
+            # sys.exit(1)
+            logger.error('need a valid path for the data files')
+            return None
+
+        # Define the paths corresponding to each source here
+        # Default is just the source name with spaces removed; this won't work for RXTE
+
+        self.source = Sources()
+        self.source_name = self.source['name']
+        if self.label == 'XP':
+            # for RXTE/PCA, most sources just omit the prefix
+            self.source_path = [x.split()[1] for x in self.source_name]
+        else:
+            # more commonly we just remove the spaces
+            self.source_path = self.source_name.replace(" ", "")
+
+        if self.label == 'IJ':
+            # for JEM-X, the convention is to also replace '+' with 'p'
+            self.source_path = self.source_path.replace("+","p")
+
+        # Define the lightcurve and spectral files
+
+        self.lightcurve = lightcurve
+        self.spectrum = spectrum
+
+        # Check that the directories in the data path all correspond to source_paths
+        # You don't want to miss observations in some directory because of inconsistencies
+        # with the directory names
+
+        self.has_dir, self.nonmatched, self.nmissing = verify_path(self.source, self.path, self.source_path)
+
+
+    def __str__(self):
+        """
+        Method to display information about this object
+        :return:
+        """
+
+        return """
+MINBAR instrument definition
+
+Name: {} ({})
+Data path: {}
+Lightcurve(s): {}
+Spectra: {}""".format(self.name, self.label, self.path, self.lightcurve, self.spectrum)
+
+
+    def analyse_persistent(self, src, obsid):
+        """
+        Function to analyse the persistent emission (lightcurve and spectrum) for a single
+        observation
+        :param src:
+        :param obsid:
+        :return:
+        """
+
+    def analyse_burst(self, bursts):
+        """
+        Function to analyse the persistent emission (lightcurve and spectrum) for a single
+        observation
+        :param src:
+        :param obsid:
+        :return:
+        """
