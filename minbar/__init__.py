@@ -88,6 +88,7 @@ def verify_path(source, path, source_path):
     nonmatched = 0
     with os.scandir(path + '/data/') as entries:
         for entry in entries:
+            # print (entry, entry.name)
             if os.path.isdir(entry) and not (entry.name in source_path):
                 logger.warning("possible non-compliant source path {}".format(entry.name))
                 nonmatched += 1
@@ -96,6 +97,7 @@ def verify_path(source, path, source_path):
                 _i = np.where(source_path == entry.name)[0]
                 # print (entry.name,_i)
                 assert len(_i) <= 1
+                # print (entry.name, _i)
                 if len(_i) == 1:
                     has_dir[_i[0]] = True
 
@@ -603,6 +605,7 @@ class Observation:
 
         # Read in the lightcurve
 
+
 class Sources:
     """
     Contain all information on the sources present in Minbar in
@@ -856,7 +859,7 @@ class Instrument:
         self.source_name = self.source['name']
         if self.label == 'XP':
             # for RXTE/PCA, most sources just omit the prefix
-            self.source_path = [x.split()[1] for x in self.source_name]
+            self.source_path = np.array([x.split()[1] for x in self.source_name])
         else:
             # more commonly we just remove the spaces
             self.source_path = self.source_name.replace(" ", "")
