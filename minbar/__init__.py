@@ -91,7 +91,7 @@ def verify_path(source, path, source_path, verbose=True):
 
     has_dir = [False] * len(source)
     nonmatched = 0
-    with os.scandir(path + '/data/') as entries:
+    with os.scandir('/'.join([MINBAR_ROOT, path, 'data'])) as entries:
         for entry in entries:
             # print (entry, entry.name)
             if os.path.isdir(entry) and not (entry.name in source_path):
@@ -604,7 +604,7 @@ class Observation:
         """
 
         instr = self.instr.label
-        return '/'.join([MINBAR_ROOT, MINBAR_INSTR_PATH[instr],'data',
+        return '/'.join([MINBAR_ROOT, self.instr.path, 'data',
                          self.instr.source_path[self.instr.source_name == self.name][0],
                          self.obsid])
 
@@ -621,8 +621,8 @@ class Observation:
         if self.instr.label == 'XP':
             filename = self.instr.lightcurve(self.obsid)
         else:
-            logger.warning("other instruments not yet implemented")
-            return None
+            # logger.warning("other instruments not yet implemented")
+            filename = self.instr.lightcurve
 
         # print (path+'/'+filename)
         lcfile = fits.open(path+'/'+filename)
@@ -893,7 +893,7 @@ class Instrument:
             logger.warning('new instrument {} may not be fully implemented'.format(name))
             self.label = label
 
-        if os.path.isdir(path):
+        if os.path.isdir('/'.join([MINBAR_ROOT, path])):
             self.path = path
         else:
             # sys.exit(1)
