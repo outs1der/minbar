@@ -19,8 +19,11 @@ import os, re
 from astropy.io import fits
 from astropy.io import ascii
 import astropy.units as u
+from astropy.time import Time
 import logging
 import sys
+
+import matplotlib.pyplot as plt
 
 # kpc = 3.086e21 # cm
 kpc = u.kpc.to('cm') # cm
@@ -75,10 +78,12 @@ def create_logger():
 logger = create_logger()
 
 
-def verify_path(source, path, source_path):
+def verify_path(source, path, source_path, verbose=True):
     """
     Generic routine to verify the data path, and try to match up the source names with the
     directories in the tree
+    Should be incorporated into the Instrument class
+    :param source:
     :param path:
     :param source_path:
     :return:
@@ -90,7 +95,8 @@ def verify_path(source, path, source_path):
         for entry in entries:
             # print (entry, entry.name)
             if os.path.isdir(entry) and not (entry.name in source_path):
-                logger.warning("possible non-compliant source path {}".format(entry.name))
+                if verbose:
+                    logger.warning("possible non-compliant source path {}".format(entry.name))
                 nonmatched += 1
             else:
                 # self.has_dir[self.source_path.index(entry.name)] = True
@@ -102,7 +108,7 @@ def verify_path(source, path, source_path):
                     has_dir[_i[0]] = True
 
     nmissing = len(np.where(np.logical_not(has_dir))[0])
-    if nonmatched > 0:  # or self.nmissing > 0:
+    if (nonmatched > 0) & verbose:  # or self.nmissing > 0:
         print("""
 Possible inconsistencies in the directory tree; 
   {} directories without source matches
@@ -528,46 +534,6 @@ class Observations(Minbar):
         self.clear()
 
 
-    def get_path(self, entry):
-        """
-        Return the path for MINBAR observations, assuming you have them stored locally
-        :param entry:
-        :return:
-        """
-
-        instr = self[entry]['instr'][0][0:2]
-        return '/'.join([self.MINBAR_ROOT, self.MINBAR_INSTR_PATH[instr],'data',
-                self[entry]['name'][0].replace(" ",""),
-                self[entry]['obsid'][0]])
-
-
-    def get_lc(self, entry):
-        """
-        Return the lightcurve for a particular observation; this is a replacement for the IDL routine get_lc.pro
-        :param entry:
-        :return:
-        """
-
-        path = self.get_path(entry)
-        instr = self[entry]['instr'][0][0:2]
-        if instr == 'XP':
-            filename = 'stdprod/xp{}_n1.lc.gz'.format(self[entry]['obsid'][0].replace("-",""))
-        else:
-            logger.warning("other instruments not yet implemented")
-            return None
-
-        # print (path+'/'+filename)
-        lcfile = fits.open(path+'/'+filename)
-
-        lc = lcfile[1].data
-
-        lcfile.close()
-
-        # Can clean up the table here if necessary; i.e. create a Lightcurve
-        # object, adopt uniform time scale etc.
-
-        return lc
-
     def __str__(self):
         """
         Return a nice string.
@@ -582,9 +548,10 @@ class Observation:
     """
 
 
-    def __init__(self, obs_entry=None, instr=None, source=None, obsid=None):
+    def __init__(self, obs_entry=None, instr=None, name=None, obsid=None):
         """
-        Create an observation instanced, either from a MINBAR obs entry, or by-hand
+        Create an observation instance, either from a MINBAR obs entry, or by-hand
+        Ideally this object should make available every parameter in the MINBAR observation table
         :param obs_entry: 
         :param instr: 
         :param source: 
@@ -592,18 +559,98 @@ class Observation:
         """
 
         if obs_entry is not None:
-            logger.warning('not yet completely implemented')
+            logger.warning('initialisation from obs entry not yet completely implemented')
             # Really need to create an instrument here
-            label = [key for key, value in MINBAR_INSTR_LABEL.items() if value == obs_entry['instr'][:2]][0]
+            label = [key for key, value in MINBAR_INSTR_LABEL.items() if value == obs_entry['instr'][0][:2]][0]
+            # print (label)
             instr = Instrument(label)
-            source = obs_entry['name']
-            obsid = obs_entry['obsid']
+            name = obs_entry['name'][0]
+            obsid = obs_entry['obsid'][0]
 
+        # Potentially need to check here that all of the passed parameters are set
         self.instr = instr
-        self.source = source
+        self.name = name
         self.obsid = obsid
 
-        # Read in the lightcurve
+        # Define parameters for the lightcurve; later this might be a class
+        # The lightcurve might also not be available, so don't force it to be read in now
+
+        self.time = None
+        self.rate = None
+        self.error = None
+
+
+    def plot(self):
+        """
+        Plot the lightcurve, reading it in first if need be
+        :return:
+        """
+        if self.time is None:
+            lc = self.get_lc()
+
+        # plt.plot(lc['TIME'],lc['RATE'])
+        # plot can't work with "raw" time units
+        plt.plot(self.mjd.mjd, self.rate)
+        plt.xlabel('Time (MJD '+self.mjd.scale.upper()+')')
+        plt.ylabel('Rate (count s$^{-1}$)')
+        plt.show()
+
+
+    def get_path(self):
+        """
+        Return the path for MINBAR observations, assuming you have them stored locally
+        :param entry:
+        :return:
+        """
+
+        instr = self.instr.label
+        return '/'.join([MINBAR_ROOT, MINBAR_INSTR_PATH[instr],'data',
+                         self.instr.source_path[self.instr.source_name == self.name][0],
+                         self.obsid])
+
+
+    def get_lc(self):
+        """
+        Return the lightcurve for a particular observation; this is a replacement for the IDL routine get_lc.pro
+        This routine also populates the time, mjd_tt, mjd, rate, and error attributes for the observation
+        :param entry:
+        :return:
+        """
+
+        path = self.get_path()
+        if self.instr.label == 'XP':
+            filename = self.instr.lightcurve(self.obsid)
+        else:
+            logger.warning("other instruments not yet implemented")
+            return None
+
+        # print (path+'/'+filename)
+        lcfile = fits.open(path+'/'+filename)
+
+        # For XTE files, convention is to have the first extension RATE and a second extension STDGTI
+        header = lcfile[0].header
+        lc = lcfile[1].data
+
+        lcfile.close()
+
+        # Can clean up the table here if necessary; i.e. create a Lightcurve
+        # object (not yet defined), adopt uniform time scale etc.
+        # Using astropy to keep track of the time scale and units, read from the
+        # header file; see https://docs.astropy.org/en/stable/time
+
+        self.timesys = header['TIMESYS']
+        self.timeunit = header['TIMEUNIT']
+        self.time = lc['TIME']*u.Unit(self.timeunit)
+        if self.instr.name == 'PCA':
+            # convert raw times to MJD (TT) here; see https://heasarc.gsfc.nasa.gov/docs/xte/abc/time_tutorial.html
+            # can check results using https://heasarc.gsfc.nasa.gov/cgi-bin/Tools/xTime
+            self.mjd_tt = Time( self.time.to('d') + (header['MJDREFI'] + header['MJDREFF'])*u.d, format='mjd', scale='tt') # TT
+            self.mjd = self.mjd_tt.utc
+
+        self.rate = lc['RATE']/u.s
+        self.error = lc['ERROR']/u.s
+
+        return lc
 
 
 class Sources:
@@ -828,7 +875,8 @@ class Instrument:
 
     def __init__(self, name, path=None, label=None,
                  lightcurve=['lc1_3-25keV_1.0s.fits','lc2_3-25keV_1.0s.fits'],
-                 spectrum=None):
+                 spectrum=None,
+                 verbose=False):
 
         self.name = name
         if name in MINBAR_INSTR_LABEL.keys():
@@ -860,6 +908,9 @@ class Instrument:
         if self.label == 'XP':
             # for RXTE/PCA, most sources just omit the prefix
             self.source_path = np.array([x.split()[1] for x in self.source_name])
+            # The standard product lightcurve also includes the obsid, so define the lightcurve
+            # parameter as a function here
+            lightcurve = self.pca_lightcurve_filename
         else:
             # more commonly we just remove the spaces
             self.source_path = self.source_name.replace(" ", "")
@@ -870,6 +921,7 @@ class Instrument:
 
         # Define the lightcurve and spectral files
 
+        assert lightcurve is not None
         self.lightcurve = lightcurve
         self.spectrum = spectrum
 
@@ -877,7 +929,8 @@ class Instrument:
         # You don't want to miss observations in some directory because of inconsistencies
         # with the directory names
 
-        self.has_dir, self.nonmatched, self.nmissing = verify_path(self.source, self.path, self.source_path)
+        self.has_dir, self.nonmatched, self.nmissing = verify_path(
+            self.source, self.path, self.source_path, verbose=verbose)
 
 
     def __str__(self):
@@ -893,6 +946,15 @@ Name: {} ({})
 Data path: {}
 Lightcurve(s): {}
 Spectra: {}""".format(self.name, self.label, self.path, self.lightcurve, self.spectrum)
+
+
+    def pca_lightcurve_filename(self, obsid):
+        """
+        Function to return the lightcurve name for PCA observations
+        :return:
+        """
+
+        return 'stdprod/xp{}_n1.lc.gz'.format(obsid.replace("-", ""))
 
 
     def analyse_persistent(self, src, obsid):
