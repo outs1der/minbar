@@ -32,7 +32,7 @@ kpc = u.kpc.to('cm') # cm
 # Bytearr entries are for consistency between the IDL and ASCII
 # versions of the data
 
-MINBAR_ROOT = '/Users/Shared/burst/minbar'
+MINBAR_ROOT = '/home/burst/minbar'
 MINBAR_INSTR_LABEL = {'PCA': 'XP', 'WFC': 'SW', 'JEM-X': 'IJ'}
 MINBAR_INSTR_PATH = {'XP': 'xte', 'SW': 'wfc', 'IJ': 'jemx',
                      'PCA': 'xte', 'WFC': 'wfc', 'JEM-X': 'jemx',
@@ -870,7 +870,7 @@ class Instrument:
     Defines the properties of an instrument with data that we're going to analyse and add to MINBAR
     Example
     import minbar
-    jemx = minbar.Instrument('JEM-X', '../jemx', 'IJ')
+    jemx = minbar.Instrument('JEM-X', 'jemx', 'IJ')
     """
 
     def __init__(self, name, path=None, label=None,
@@ -883,7 +883,7 @@ class Instrument:
             # These are the known MINBAR instruments
             self.label = MINBAR_INSTR_LABEL[name]
             if path is None:
-                path = '../'+MINBAR_INSTR_PATH[self.label]
+                path = MINBAR_INSTR_PATH[self.label]
 
         else:
             # all other instruments
