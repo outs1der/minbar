@@ -15,6 +15,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 from .idldatabase import IDLDatabase
 from .analyse import *
 import numpy as np
+import pandas as pd
 import os, re
 from astropy.io import fits
 from astropy.io import ascii
@@ -32,7 +33,7 @@ kpc = u.kpc.to('cm') # cm
 # Bytearr entries are for consistency between the IDL and ASCII
 # versions of the data
 
-MINBAR_ROOT = '/home/burst/minbar'
+MINBAR_ROOT = '/Users/Shared/burst/minbar'
 MINBAR_INSTR_LABEL = {'PCA': 'XP', 'WFC': 'SW', 'JEM-X': 'IJ'}
 MINBAR_INSTR_PATH = {'XP': 'xte', 'SW': 'wfc', 'IJ': 'jemx',
                      'PCA': 'xte', 'WFC': 'wfc', 'JEM-X': 'jemx',
@@ -164,6 +165,10 @@ class Minbar(IDLDatabase):
         # Generate the list of names
         self.names = self.get_names()
 
+        # Define an index; see https://docs.astropy.org/en/stable/table/indexing.html
+        self.records.add_index('entry')
+
+
     def fix_labels(self):
         """
         Fix the whitespace in the labels when reading in the IDL version.
@@ -171,6 +176,7 @@ class Minbar(IDLDatabase):
         pat = re.compile('\s+')
         for k in self.field_labels:
             self.field_labels[k] = re.sub(pat, ' ', self.field_labels[k])
+
 
     def get_names(self):
         """
@@ -189,6 +195,7 @@ class Minbar(IDLDatabase):
 
         return names
 
+
     def get_default_path(self, filename):
         """
         Return the default path of the minbar data files with prefix
@@ -196,11 +203,13 @@ class Minbar(IDLDatabase):
         """
         return os.path.join(os.path.dirname(__file__), 'data', filename)
 
+
     def __len__(self):
         """
         Return the number of entries in the current selection.
         """
         return len(self.ind)
+
 
     def get_type(self):
         """
@@ -210,6 +219,7 @@ class Minbar(IDLDatabase):
             return np.ones(len(self.records), np.bool)
         else:
             return self.records.field('type') == self.type
+
 
     def clear(self):
         """
@@ -300,7 +310,9 @@ class Minbar(IDLDatabase):
         if type(field) == str:
             return self.get(field)
 
-        return self.records[self.records['entry'] == field]
+        # The code below requires that entry is set up as the index
+        # return self.records[self.records['entry'] == field]
+        return self.records.loc[field]
 
 
     def instr_like(self, instrument):
@@ -318,6 +330,19 @@ class Minbar(IDLDatabase):
             return np.char.array(self['instr']).startswith(instrument)
         except:
             return np.char.array(self['instr']).startswith(instrument.encode('ascii'))
+
+
+    def select_all(self, names):
+        """
+        Select multiple sources with given names.
+        """
+        selection = np.zeros_like(self.selection)
+        for name in names:
+            selection = np.logical_or(selection, self.records.field('name') == name)
+        self.selection = selection & self.get_type()  # Only bursts of specified type
+        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
+        self.ind = np.where(self.selection)[0][self.time_order]
+        logger.info('Selected {} {}s'.format(len(np.where(self.selection)[0]), self.entryname))
 
 
 class Bursts(Minbar):
@@ -367,18 +392,6 @@ class Bursts(Minbar):
         self.clear()
 
     
-    def select_all(self, names):
-        """
-        Select multiple sources with given names.
-        """
-        selection = np.zeros_like(self.selection)
-        for name in names:
-            selection = np.logical_or(selection, self.records.field('name') == name)
-        self.selection = selection&self.get_type() # Only bursts of specified type
-        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
-        self.ind = np.where(self.selection)[0][self.time_order]
-        logger.info('Selected {} {}s'.format(len(np.where(self.selection)[0]), self.entryname))
-    
     def exclude(self, name):
         """
         Removes source with given name from the current selection.
@@ -388,7 +401,8 @@ class Bursts(Minbar):
         self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
         self.ind = np.where(self.selection)[0][self.time_order]
         logger.info('Selected {} {}s by excluding {}'.format(len(np.where(self.selection)[0]), self.entryname, name))
-    
+
+
     def exclude_like(self, name):
         """
         Like exclude, but get the name from get_name_like().
@@ -403,7 +417,8 @@ class Bursts(Minbar):
             
             if len(names)>1:
                 logger.info('{} more matching sources: {}'.format(len(names) - 1, ', '.join(names[1:])))
-    
+
+
     def __str__(self):
         """
         Return a nice string.
@@ -682,13 +697,17 @@ class Sources:
         self.field_names += ['dist', 'diste']
         self.field_labels['dist'] = 'Distance (kpc)'
         self.field_labels['diste'] = 'Error on distance (kpc)'
-    
+
+        self.F_Edd, self.F_Edd_err = self.get_F_Edd()
+
+
     def get_default_path(self):
         """
         Return the default path of the source list
         """
         return os.path.join(os.path.dirname(__file__), 'data', 'minbar_sources.fits')
-    
+
+
     def _get_field_labels(self):
         """
         Get the field labels from the comment fields in the fits header
@@ -703,13 +722,15 @@ class Sources:
                 label = '{} ({})'.format(label, unit)
             field_labels[header['TTYPE'+column].lower()] = label
         return field_labels
-    
+
+
     def __len__(self):
         """
         Return the number of entries
         """
         return self._f[1].data.shape[0]
-    
+
+
     def get(self, field, all=False):
         """
         Return field with given name.
@@ -746,7 +767,8 @@ class Sources:
             elif name2.lower().find(name)>-1:
                 selection.append(i)
         return np.array(selection)
-    
+
+
     def name_like(self, name):
         """
         Select the source with given name. Uses first result from self.get_name_like()
@@ -759,13 +781,44 @@ class Sources:
                 logger.info('{} more matching sources: {}'.format(len(ind) - 1, ', '.join(self.get('name', True)[ind[1:]])))
         else:
             logger.info('No matching source')
-    
+
+
     def clear(self):
         """
         Clear current source selection
         """
         self.selection = None
-    
+
+
+    def get_F_Edd(self):
+        """
+        Read in information from Eddington fluxes file
+        :return:
+        """
+
+        self.EddingtonFluxes = MINBAR_ROOT + '/EddingtonFluxes.dat'
+        if not os.path.isfile(self.EddingtonFluxes):
+            logger.warning('can\'t read file {}, Eddington flux values unavailabile'.format(self.EddingtonFluxes))
+
+        d = pd.read_csv(self.EddingtonFluxes, header=None, engine='python',
+                        names=["BursterNo", "SourceName", "RXTEname", "F_Edd", "F_Edd_Err", "Chisqdf",
+                               "Timestamp", "PCA", "SWFC", "LBC", "flag0", "flag1", "flag2", "flag3", "flag4", "flag5",
+                               "flag6", "flag7", "flag8"], sep=', ')
+        d.set_index('SourceName', inplace=True)
+
+        # Map Eddington fluxes onto the name array, as for the distances
+
+        F_Edd = np.zeros_like(self['ra_obj'])
+        F_Edd_Err = np.zeros_like(F_Edd)
+        for i, name in enumerate(self['name']):
+            if name in d.index:
+                F_Edd[i] = d.loc[name]['F_Edd']
+                F_Edd_Err[i] = d.loc[name]['F_Edd_Err']
+                # print(name, F_Edd[i], F_Edd_Err[i])
+
+        return F_Edd, F_Edd_Err
+
+
     def get_distances(self):
         """
         Create an array of distances for all sources in self.name
@@ -853,7 +906,9 @@ class Sources:
                      'GX 3+1': (6.5, 0),
                      'GX 13+1': (7.0, 0), # Christian & Swank 1997
                      }
-        
+
+        logger.warning('distances are outdated, use with caution')
+
         dist = np.zeros_like(self['ra_obj'])
         diste = np.zeros_like(dist)
         for i, name in enumerate(self['name']):
