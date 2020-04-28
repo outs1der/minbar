@@ -29,15 +29,25 @@ import matplotlib.pyplot as plt
 # kpc = 3.086e21 # cm
 kpc = u.kpc.to('cm') # cm
 
-# Local paths for MINBAR data
+# Local paths for MINBAR data; you need to update this when installing
+# on a new system
+
+MINBAR_ROOT = '/Users/Shared/burst/minbar'
+
 # Bytearr entries are for consistency between the IDL and ASCII
 # versions of the data
 
-MINBAR_ROOT = '/Users/Shared/burst/minbar'
 MINBAR_INSTR_LABEL = {'PCA': 'XP', 'WFC': 'SW', 'JEM-X': 'IJ'}
 MINBAR_INSTR_PATH = {'XP': 'xte', 'SW': 'wfc', 'IJ': 'jemx',
                      'PCA': 'xte', 'WFC': 'wfc', 'JEM-X': 'jemx',
                      b'XP': 'xte', b'SW': 'wfc', b'IJ': 'jemx'}
+
+# derived effective areas used to renormalise PCA and JEM-X lightcurves;
+# see the MINBAR paper (Galloway et al. 2020), Table 4
+
+PCA_EFFAREA = 1400*u.cm**2
+JEMX_EFFAREA = 64*u.cm**2
+JEMX_EFFAREA_BURSTS = 100*u.cm**2
 
 # List of ultra compacts from In 't Zand (2007) (1850-087 and 1905+000 no bursts in MINBAR)
 # Includes all candidates. Should I add 1728?
@@ -560,6 +570,10 @@ class Observation:
     """
     This object is intended to allow all the possible actions you might have on an
     observation. You can create it from a minbar entry, or given an instrument, source name and obs ID
+    Example usage:
+    import minbar
+    o = minbar.Observations()
+    obs = minbar.Observation(o[14637])
     """
 
 
@@ -618,7 +632,7 @@ class Observation:
         # plot can't work with "raw" time units
         plt.plot(self.mjd.mjd, self.rate)
         plt.xlabel('Time (MJD '+self.mjd.scale.upper()+')')
-        plt.ylabel('Rate (count s$^{-1}$)')
+        plt.ylabel('Rate (count s$^{-1}$ cm$^{-2}$)')
         plt.show()
 
 
@@ -667,14 +681,16 @@ class Observation:
         self.timesys = header['TIMESYS']
         self.timeunit = header['TIMEUNIT']
         self.time = lc['TIME']*u.Unit(self.timeunit)
+
+        effarea = 1.*u.cm**2    # dummy value
         if self.instr.name == 'PCA':
             # convert raw times to MJD (TT) here; see https://heasarc.gsfc.nasa.gov/docs/xte/abc/time_tutorial.html
             # can check results using https://heasarc.gsfc.nasa.gov/cgi-bin/Tools/xTime
             self.mjd_tt = Time( self.time.to('d') + (header['MJDREFI'] + header['MJDREFF'])*u.d, format='mjd', scale='tt') # TT
             self.mjd = self.mjd_tt.utc
 
-        self.rate = lc['RATE']/u.s
-        self.error = lc['ERROR']/u.s
+        self.rate = lc['RATE']/u.s/self.instr.effarea
+        self.error = lc['ERROR']/u.s/self.instr.effarea
 
         return lc
 
@@ -977,6 +993,8 @@ class Instrument:
             # The standard product lightcurve also includes the obsid, so define the lightcurve
             # parameter as a function here
             lightcurve = self.pca_lightcurve_filename
+            self.effarea = PCA_EFFAREA
+            self.effarea_bursts = PCA_EFFAREA
         else:
             # more commonly we just remove the spaces
             self.source_path = self.source_name.replace(" ", "")
@@ -984,12 +1002,13 @@ class Instrument:
         if self.label == 'IJ':
             # for JEM-X, the convention is to also replace '+' with 'p'
             self.source_path = self.source_path.replace("+","p")
+            self.effarea = JEMX_EFFAREA
+            self.effarea_bursts = JEMX_EFFAREA_BURSTS
 
-        # Define the lightcurve and spectral files
-
-        assert lightcurve is not None
-        self.lightcurve = lightcurve
-        self.spectrum = spectrum
+        if self.label == 'SW':
+            # BeppoSAX/WFC
+            # Lightcurves are already normalised
+            self.effarea = 1.*u.cm**2
 
         # Check that the directories in the data path all correspond to source_paths
         # You don't want to miss observations in some directory because of inconsistencies
@@ -997,6 +1016,12 @@ class Instrument:
 
         self.has_dir, self.nonmatched, self.nmissing = verify_path(
             self.source, self.path, self.source_path, verbose=verbose)
+
+        # Define the lightcurve and spectral files
+
+        assert lightcurve is not None
+        self.lightcurve = lightcurve
+        self.spectrum = spectrum
 
 
     def __str__(self):
