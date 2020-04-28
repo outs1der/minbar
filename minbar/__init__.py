@@ -576,11 +576,14 @@ class Observation:
         if obs_entry is not None:
             logger.warning('initialisation from obs entry not yet completely implemented')
             # Really need to create an instrument here
-            label = [key for key, value in MINBAR_INSTR_LABEL.items() if value == obs_entry['instr'][0][:2]][0]
+            label = [key for key, value in MINBAR_INSTR_LABEL.items() if value == obs_entry['instr'][:2]][0]
             # print (label)
             instr = Instrument(label)
-            name = obs_entry['name'][0]
-            obsid = obs_entry['obsid'][0]
+            name = obs_entry['name']
+            obsid = obs_entry['obsid']
+
+            self.tstart = obs_entry['tstart']
+            self.tstop = obs_entry['tstop']
 
         # Potentially need to check here that all of the passed parameters are set
         self.instr = instr
@@ -593,6 +596,14 @@ class Observation:
         self.time = None
         self.rate = None
         self.error = None
+
+
+    def __str__(self):
+        """
+        Return a nice string.
+        """
+        return "MINBAR observation of {}\nInstrument: {}\nObsID: {}\nTime range: {}-{}".format(
+            self.name, self.instr.name, self.obsid, self.tstart, self.tstop)
 
 
     def plot(self):
