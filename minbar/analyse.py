@@ -746,9 +746,9 @@ def generate_bins(x_b, x_o, nperbin=10, log=True, x_lim=None, x_add=None):
     return bins
 
 
-def calc_alpha(src, bc=[1.0, 0.0], nperbin=16, limit=None, custom=None,
+def calc_alpha(src, bc=None, nperbin=16, limit=None, custom=None,
                filter=None, exclude_short=True, gap=False, log=False, s_z=False,
-               verify=False, debug=False):
+               verify=False, debug=False, verbose=True):
     """
     This function calculates mean burst rates for a given source as well as
     alphas etc. binned as a function of source flux
@@ -811,13 +811,18 @@ def calc_alpha(src, bc=[1.0, 0.0], nperbin=16, limit=None, custom=None,
 
     # Set bolometric correction for alpha-calculation
 
-    if not isinstance(bc,list):
-        bc=[bc]
-    _bc = bc[0]
-    if len(bc) > 1:
-        _bce = bc[1]
+    if bc is not None:
+        if not isinstance(bc,list):
+            bc=[bc]
+        if abs(bc[0]-minbar.BOL_CORR[src][1]) > eta:
+            minbar.logger.warning('overriding default MINBAR bolometric correction for {}'.format(src))
+        _bc = bc[0]
+        if len(bc) > 1:
+            _bce = bc[1]
+        else:
+            _bce = 0.0
     else:
-        _bce = 0.0
+        _bc, _bce = minbar.BOL_CORR[src][1:]
 
     gflag = True  # Flag to tell if we have fedd defined for each source. If
     #   True, then we bin using gammas; if False, we use fluxes
@@ -835,6 +840,14 @@ def calc_alpha(src, bc=[1.0, 0.0], nperbin=16, limit=None, custom=None,
     test = s['F_Edd']
     if test > 0.:
         fedd = test
+
+    # Get the anisotropy factor
+
+    if 'D' in (s['type']):
+        aniso_fac = minbar.ANISOTROPY['dipper'][1] / minbar.ANISOTROPY['dipper'][0]
+    else:
+        aniso_fac = minbar.ANISOTROPY['non-dipper'][1] / minbar.ANISOTROPY['non-dipper'][0]
+
     s.clear()
 
     # Check that all sources have an F_Edd value, and adjust if not
@@ -847,7 +860,8 @@ def calc_alpha(src, bc=[1.0, 0.0], nperbin=16, limit=None, custom=None,
     # Generate the list of bursts.
 
     # print("{}: generating the list of bursts matching criteria {}".format(fn, criteria + filter))
-    print("{}: generating the list of bursts".format(fn))
+    if verbose:
+        print("{}: generating the list of bursts".format(fn))
 
     # Build up the burst list
 
@@ -863,12 +877,14 @@ def calc_alpha(src, bc=[1.0, 0.0], nperbin=16, limit=None, custom=None,
         _tdel = m['tdel'].data
         good = np.where((_tdel == 0.0) | (_tdel > tdel_thresh))[0]
         if len(lburst) > len(good):
-            print("{}: omitting {} of {} short del-t bursts".format(fn, len(lburst) - len(good), len(lburst)))
+            if verbose:
+                print("{}: omitting {} of {} short del-t bursts".format(fn, len(lburst) - len(good), len(lburst)))
             if len(good) > 0:
                 lburst = lburst[good]
             else:
-                print('calc_alpha: exclude_short left no bursts')
+                minbar.logger.error('calc_alpha: exclude_short left no bursts')
                 lburst = []
+                return None
 
     n = len(lburst)
 
@@ -925,7 +941,7 @@ def calc_alpha(src, bc=[1.0, 0.0], nperbin=16, limit=None, custom=None,
     bad, nbad, good = idlwhere(gamma <= 0.)  # ,nbad,compl=nz)
 
     if verify:
-        if nbad > 0:
+        if (nbad > 0) and verbose:
             print("{}: ** WARNING ** {}/{} burst gamma-values not set".format(fn, len(bad), n))
 
         # Recalculate the gamma-values from minbar-obs, to check how up-to-date the
@@ -935,9 +951,10 @@ def calc_alpha(src, bc=[1.0, 0.0], nperbin=16, limit=None, custom=None,
 
         missing = np.where(oid <= 0)[0]  # ,nmissing)
         if len(missing) > 0:
-            print("{}: ** WARNING ** {} bursts without matching observation in minbar-obs".format(fn, len(missing)))
-            print(lburst[missing])
-            if max(gamma[missing]) > 0.:
+            if verbose:
+                print("{}: ** WARNING ** {} bursts without matching observation in minbar-obs".format(fn, len(missing)))
+                print(lburst[missing])
+            if (max(gamma[missing]) > 0.) and verbose:
                 print(fn + ': ** ERROR ** burst with missing obs has non-zero gamma value (how?)')
 
     # Extract all the burst parameters. The important parameters here are
@@ -977,7 +994,8 @@ def calc_alpha(src, bc=[1.0, 0.0], nperbin=16, limit=None, custom=None,
     # see http://burst.sci.monash.edu/wiki/index.php?n=MINBAR.Minbar-obsColumn#flag
     criteria = criteria + 'sig>3,fluxe>0,'
 
-    print("{}: generating the list of observations matching criteria {}".format(fn, criteria))
+    if verbose:
+        print("{}: generating the list of observations matching criteria {}".format(fn, criteria))
 
     o = minbar.Observations()
 
@@ -1016,7 +1034,7 @@ def calc_alpha(src, bc=[1.0, 0.0], nperbin=16, limit=None, custom=None,
 
     bad, nbad, nz = idlwhere(nflux <= 0.)
     if verify and (not s_z):
-        if nbad > 0:
+        if (nbad > 0) and verbose:
             print("{}: ** WARNING ** {}/{} obs flux/gamma-values not set".format(fn, nbad, len(lobs)))
 
     # Now that we have a maximal set of fluxes, select the "good" observations here
@@ -1024,25 +1042,25 @@ def calc_alpha(src, bc=[1.0, 0.0], nperbin=16, limit=None, custom=None,
     gfl, nobs, oexcl = idlwhere((nflux > obs_limit[0])
                                 & (nflux < obs_limit[1]))  # Good fluxes, was tmp
 
-    if len(oexcl) > 0:
+    if (len(oexcl) > 0) and verbose:
         print("{}: ** WARNING ** excluded {} observations based on gamma".format(fn, len(oexcl)))
     # if debug and (limit_low) and (not s_z):
     #     print('** WARNING ** omitting observations with gamma/s_z < {}'.format(min_gamma*0.9))
     if nobs == 0:
-        print('{}: ** WARNING ** can''t calculate rates, no valid fluxes'.format(fn))
+        minbar.logger.error('{}: ** WARNING ** can''t calculate rates, no valid fluxes'.format(fn))
         return None
 
-    # done up to here
+    # This section may be partially redundant
 
     badobs = []
     if len(nflux) > nobs:
         #    bad=where(nflux le 0.0)
-        bad = np.where(nflux < obs_limit[0])[0]
-        if s_z:
-            print("{}: Omitting {} of {} observations for binning (on S_Z)".format(fn, len(bad), len(nflux)))
-        else:
-            print("{}: Omitting {} of {} observations for binning (on flux/gamma)".format(fn, len(bad), len(nflux)))
-        badobs = lobs[bad]
+        if verbose:
+            if s_z:
+                print("{}: Omitting {} of {} observations for binning (on S_Z)".format(fn, len(oexcl), len(nflux)))
+            else:
+                print("{}: Omitting {} of {} observations for binning (on flux/gamma)".format(fn, len(oexcl), len(nflux)))
+        badobs = lobs[oexcl]
 
     # Now reduce the arrays to the good values
 
@@ -1056,16 +1074,18 @@ def calc_alpha(src, bc=[1.0, 0.0], nperbin=16, limit=None, custom=None,
 
     bins = generate_bins(nflux_bursts, nflux, nperbin=nperbin, x_lim=limit, x_add=custom)
     nbins = len(bins)
-    nb = np.zeros(nbins)
-    nb_lo = np.zeros(nbins)
+    nb = np.zeros(nbins)    # Number of bursts in each bin
+    nb_lo = np.zeros(nbins) # 1-sigma lower and upper limits
     nb_hi = np.zeros(nbins)
-    yall = np.zeros(nbins)
-    rateall = np.zeros(nbins)
-    rateall_lo = np.zeros(nbins)
+    bin_id = {}             # Keep track of which bursts and observations are in each bin
+    bin_oid = {}
+    yall = np.zeros(nbins)  #
+    rateall = np.zeros(nbins)       # Average burst rate in each bin
+    rateall_lo = np.zeros(nbins)    # 1-sigma lower and upper limits on rate
     rateall_hi = np.zeros(nbins)
-    alpha = np.zeros(nbins)
+    alpha = np.zeros(nbins)         # Average alpha for each bin
     alpha_err = np.zeros(nbins)
-    alpha_err_lo = np.zeros(nbins)
+    alpha_err_lo = np.zeros(nbins)  # 1-sigma lower and upper limits on alpha
     alpha_err_hi = np.zeros(nbins)
 
     # Assign the bursts, and observations, to each bin
@@ -1088,6 +1108,10 @@ def calc_alpha(src, bc=[1.0, 0.0], nperbin=16, limit=None, custom=None,
         if ngb > 0:
             nb[i] = ngb
 
+            # Accumulate the burst IDs in this bin
+
+            bin_id[i] = lburst[gb]
+
             nb_lo[i] = scipy.special.gammaincinv(nb[i] + 1, q)
             nb_hi[i] = scipy.special.gammaincinv(nb[i] + 1, 1. - q)
 
@@ -1104,21 +1128,12 @@ def calc_alpha(src, bc=[1.0, 0.0], nperbin=16, limit=None, custom=None,
                     fn, len(bad), len(gb), mfluen))
                 # print(nb[i], fluen[gb])
 
-        # Now accumulate the burst IDs in this bin. Need to check the size here, and
-        # expand the array if need be
-
-        # _s=np.shape(bin_id)
-        # if _s[1] < nb[i]:
-        #     _bin_id=np.zeros((nbins,nb[i]))
-        #     _bin_id[:,0:_s[1]-1]=bin_id
-        #     bin_id=_bin_id
-
-        # bin_id[i,0:nb[i]-1] = lburst[gb]
-
         # Find all the observations that fall into this bin
 
         g, ng, dummy = idlwhere(ind_o == i + 1)
         if ng > 0:
+            bin_oid[i] = lobs[g]
+
             # Calculate the rate and error, and alpha and error
 
             yall[i] = sum(dur[g] / 1000.)  # Duration in ks
@@ -1137,18 +1152,26 @@ def calc_alpha(src, bc=[1.0, 0.0], nperbin=16, limit=None, custom=None,
 
             flux_int = sum(dur[g] * flux[g]) * _bc
             fluen_sum = sum(fluen[gb]) * 1e3
-            alpha[i] = flux_int / fluen_sum
+            alpha[i] = aniso_fac * flux_int / fluen_sum
             # alpha_err[i] = alpha[i]/sqrt(float(nb[i]))
-            alpha_err[i] = np.sqrt(sum((dur[g] * _bc / fluen_sum) ** 2 * flux_err[g] ** 2)
+            alpha_err[i] = aniso_fac * np.sqrt(sum((dur[g] * _bc / fluen_sum) ** 2 * flux_err[g] ** 2)
                                    + sum((flux_int / fluen_sum ** 2) ** 2 * (fluen_err[gb[nz]]*1e3) ** 2))
+
+            # Factor in the bolometric correction uncertainty if present
+
+            if _bce > 0.:
+                alpha_err[i] = np.sqrt( alpha_err[i]**2 + alpha[i]**2*(_bce/_bc)**2 )
+
             # Factor in the Poisson uncertainties here
             alpha_err_lo[i] = np.sqrt( alpha_err[i]**2 + alpha[i]**2*((nb[i]-nb_lo[i])/nb[i])**2 )
             alpha_err_hi[i] = np.sqrt( alpha_err[i]**2 + alpha[i]**2*((nb_hi[i]-nb[i])/nb[i])**2 )
 
     # return everything
 
-    return {'bins': bins, 'n': nb, 'rate': rateall, 'rate_err': (rateall_lo, rateall_hi),
-            'badbursts': badbursts, 'alpha': alpha, 'alpha_err': (alpha_err_lo, alpha_err_hi) }
+    return {'src': src, 'bins': bins, 'n': nb, 'rate': rateall, 'rate_err': (rateall_lo, rateall_hi),
+            'bc': _bc, 'alpha': alpha, 'alpha_err': (alpha_err_lo, alpha_err_hi),
+            'id': lburst, 'id_obs': lobs, 'badbursts': badbursts, 'badobs': badobs,
+            'bin_id': bin_id, 'bin_oid': bin_oid }
 
 
 def binplot(bins, rate, rate_err, panel=None, pbins=None,

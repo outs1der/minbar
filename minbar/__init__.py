@@ -4,10 +4,19 @@ Provides the burst catalog (Bursts), observation catalog (Observations),
 and source catalog (Sources). See the doc strings of those classes
 for example usage.
 
-The data files should be placed in the 'data' subdirectory of this
-package.
+The data files required for this package can be downloaded from the
+bridges (figshare) repository at https://doi.org/10.26180/5e4a697d9b8b6
+The files minbar.txt, minbar-obs.txt and minbar_sources.fits
+should be placed in the 'data' subdirectory of this package.
 
-(c) 2007, Laurens Keek, l.keek@sron.nl
+The table and attribute descriptions, and the data analysis procedures,
+are all described in the accompanying paper:
+The Multi-INstrument Burst ARchive (MINBAR), by D.K. Galloway et al. (the
+MINBAR Collaboration) 2020, accepted to ApJS; preprint at
+https://arxiv.org/abs/2003.00685
+
+(c) 2020, Duncan Galloway duncan.galloway@monash.edu & Laurens Keek,
+  laurens@xrb.space
 Updated for MINBAR DR1, 2020, Duncan Galloway, duncan.galloway@monash.edu
 Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 """
@@ -48,6 +57,63 @@ MINBAR_INSTR_PATH = {'XP': 'xte', 'SW': 'wfc', 'IJ': 'jemx',
 PCA_EFFAREA = 1400*u.cm**2
 JEMX_EFFAREA = 64*u.cm**2
 JEMX_EFFAREA_BURSTS = 100*u.cm**2
+
+# Bolometric corrections adopted for different sources, based on Table 9 from
+# the paper (Galloway et al. 2020)
+# Each entry gives the # of measurements, the mean, and the standard deviation
+# Two special values are defined for "burster" and "pulsar" without their
+# own measurements.
+
+BOL_CORR = {'4U 0513-40':         (1, 1.47, 0.02),
+            'EXO 0748-676':       (4, 1.6, 0.3),
+            '4U 0836-429':        (1, 1.82, 0.02),
+            '4U 1254-69':         (3, 1.30, 0.15),
+            '4U 1323-62':         (3, 1.65, 0.05),
+            'Cir X-1':            (4, 1.12, 0.06),
+            '4U 1608-522' :       (4, 1.59, 0.13),
+            '4U 1636-536' :      (44, 1.51, 0.12),
+            'XTE J1701-462':      (2, 1.44, 0.07),
+            'MXB 1658-298':      (17, 1.32, 0.05),
+            '4U 1702-429':       (11, 1.4, 0.3),
+            '4U 1705-44':         (7, 1.51, 0.15),
+            'XTE J1709-267':      (3, 1.45, 0.05),
+            'XTE J1710-281':      (1, 1.42, 0.13),
+            'IGR J17191-2821':    (1, 1.36, 0.04),
+            'XTE J1723-376':      (1, 1.05, 0.02),
+            '4U 1728-34':        (43, 1.40, 0.15),
+            'MXB 1730-335':      (33, 1.30, 0.05),
+            'KS 1731-260':        (6, 1.62, 0.13),
+            '4U 1735-444':       (10, 1.37, 0.12),
+            'XTE J1739-285':      (1, 1.30, 0.06),
+            'SAX J1747.0-2853':   (1, 1.93, 0.06),
+            'IGR J17473-2721':    (3, 1.6, 0.5),
+            'SLX 1744-300':       (4, 1.45, 0.14),
+            'GX 3+1':             (2, 1.458, 0.008),
+            'IGR J17480-2446':   (34, 1.21, 0.02),
+            'EXO 1745-248':       (7, 1.8, 0.3),
+            'SAX J1748.9-2021':  (15, 1.43, 0.08),
+            '4U 1746-37':         (5, 1.33, 0.07),
+            'SAX J1750.8-2900':   (2, 1.338, 0.008),
+            'GRS 1747-312':       (1, 1.34, 0.04),
+            'SAX J1806.5-2215':   (1, 1.30, 0.05),
+            'GX 17+2':            (9, 1.35, 0.10),
+            '4U 1820-303':        (2, 1.45, 0.17),
+            'GS 1826-24':        (13, 1.66, 0.11),
+            'Ser X-1':           (15, 1.45, 0.08),
+            'Aql X-1':            (7, 1.65, 0.10),
+            'XB 1916-053':        (1, 1.37, 0.09),
+            'XTE J2123-058':      (2, 1.35, 0.06),
+            'Cyg X-2':           (54, 1.41, 0.05),
+            'SAX J1808.4-3658':   (1, 2.14, 0.03),
+            'XTE J1814-338':      (1, 1.86, 0.03),
+            'burster':           (-1, 1.42, 0.17), # Mean value for all bursters
+            'pulsar':            (-1, 2.00, 0.2) } # Mean value for both pulsars
+
+# Standard anisotropy factors for non-dippers and dippers; the tuple below
+# gives \xi_b, \xi_p for each class of source (see sec. 5.4 of Galloway et al. 2020)
+
+ANISOTROPY = {'non-dipper': (0.898, 0.809),
+              'dipper': (1.639, 7.27)}
 
 # List of ultra compacts from In 't Zand (2007) (1850-087 and 1905+000 no bursts in MINBAR)
 # Includes all candidates. Should I add 1728?
