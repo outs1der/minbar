@@ -2,6 +2,27 @@
 
 import numpy as np
 from scipy.signal import correlate
+import scipy.special
+import sys
+import minbar
+import matplotlib.pyplot as plt
+
+def idlwhere(bool):
+    """
+    Routine to replace the IDL where routine, which nicely returns the number of elements, and the complement
+    :param bool: boolean array derived from some expression
+    Usage:
+    a = np.arange(20)
+    good, n, bad = idlwhere(a > 15)
+    print (a[good], n)
+    [16 17 18 19] 4
+    """
+
+    i = np.where(bool)[0]
+    not_i = np.where(~bool)[0]
+
+    return i, len(i), not_i
+
 
 def gtiseg(time, maxgap=None, mingti=None):
     """
@@ -560,3 +581,671 @@ def findburst(_time, _rate, _error=None, tunit=None,
                         # If we don't fit, we only return the burst peak
 
     return t_cand
+
+
+def generate_bins(x_b, x_o, nperbin=10, log=True, x_lim=None, x_add=None):
+    """
+    Function to generate bin boundaries for calc_alpha, to maintain roughly the
+    same number of events per bin, with the option of adding a few by hand
+    :param x_b: array of values that are to be distributed evenly between bins
+    :param x_o: auxiliary array used to determine overall range of bins
+    :param nperbin: number of values of x_b to include per bin
+    :param log: determines how to calculate the bin boundaries
+    :param x_lim: limits on the maximum and minimum bin
+    :param x_add: additional bin boundaries to include
+    """
+
+    # fn = 'generate_bins'
+    fn = sys._getframe().f_code.co_name
+
+    # Depending on whether you intend to plot as log or linear spacing, this
+    # option will correctly determine the bin boundaries
+
+    _log = 0
+    if log:
+        _log = 1
+
+    # Calculate the number of bins
+
+    n = len(x_b)
+    nbins = int(n / nperbin) + 1
+
+    # If there's only 2 bins and the second one has less than half of the first
+    # just divide them evenly instead
+
+    if nbins == 2 and n - nperbin <= nperbin / 2:
+        _nperbin = n / 2
+    else:
+        # Even out the population in the bins
+        _nperbin = int(n / nbins)
+        if ((n % _nperbin) < _nperbin / 2) and ((n % (_nperbin + 1)) > (n % _nperbin)):
+            _nperbin += 1
+
+    if x_add is not None:
+        if isinstance(x_add, float):
+            x_add = [x_add]
+        n_add = len(x_add)
+
+    if nbins > 1:
+        print("{}: Dividing up into {} bins with approx. {} bursts each".format(fn, nbins, nperbin))
+    nbins = nbins + 1  # +gap
+
+    # Define the first bin
+
+    bins = np.array(min(np.concatenate((x_b, x_o))))
+    inext_old = 0  # index for counting bursts
+
+    if x_lim is not None:
+        if not isinstance(x_lim, list):
+            x_lim = [x_lim]
+        if x_lim[0] > bins:
+            inext_old = len(np.where(x_b < x_lim[0])[0])
+            print('** WARNING ** {} events below hard bin limit'.format(inext_old))
+            bins = np.array(x_lim[0])
+        if len(x_lim) > 1:
+            print('** ERROR ** upper bin limit not yet implemented')
+
+    # print (min(x_b),min(x_o), bins)
+    si = np.argsort(x_b)
+
+    # Find the largest gap between observations (bursts?). This block returns
+    # _img and img;
+    # nflux[_si[_img]] = obs flux at the lower edge of the biggest gap,
+    # nflux2[si[img]] = biggest burst flux that is below the gap
+
+    lastgap = 0
+    #  if gap then begin
+    # ;    if log then intvl=nflux2[si[1:n-1]]/nflux2[si[0:n-2]] else $
+    # ;      intvl=nflux2[si[1:n-1]]-nflux2[si[0:n-2]]
+    #    _n=n_elements(nflux) & _si=sort(nflux)
+    #    if log then intvl=nflux[_si[1:_n-1]]/nflux[_si[0:_n-2]] else $
+    #      intvl=nflux[_si[1:_n-1]]-nflux[_si[0:_n-2]]
+    #    _img=where(intvl eq max(intvl))	; Biggest gap
+    #    _img=_img[0]
+    #    img=max(where(nflux_bursts[si] le nflux[_si[_img[0]]]))
+    #    img=img[0]
+    #  endif
+
+    # Now loop to create the bin boundaries
+
+    while inext_old < n - 1:
+
+        # Set the upper limit of this bin
+
+        inext = min([n - 1, inext_old + nperbin])
+
+        if (inext == n - 1) and (lastgap == 0):
+
+            # Make the last bin with a maximum 1% bigger than the maximum either of the
+            # bursts or observations
+
+            #      bins=[bins,1.01*max([nflux,nflux2])]
+
+            # Here's an alternative approach, which may (unfortunately) leave an extra
+            # (empty) bin if there are observations at gammas exceeding the maximum burst
+            # (i.e. max(nflux)>max(nflux_bursts):
+
+            bins = np.append(bins, 1.01 * max(np.concatenate((x_b, x_o))))
+            # print('last bin', bins[-2], '-', bins[-1], max(x_b), max(x_o))
+        else:
+
+            # Here we can optionally check for gaps
+            # If the biggest gap is within the current bin, try to correct by putting
+            # a bin to cover the gap, which will then be empty
+
+            #      if gap then begin
+            #        if debug then print,fn,': ',i,lastgap
+            # ;        if nflux2[si[img]] ge bins[i] and $
+            # ;          nflux2[si[img+1]] le nflux2[si[inext]] and $
+            # ;          n_elements(where(nflux2 ge bins[i] and lastgap eq 0 and $
+            # ;          nflux2 le nflux2[si[img+1]])) gt nperbin/2 then begin
+            # ;;            bins=[bins,(1-log)*0.5*(nflux2[si[img]]+nflux2[si[img+1]]) + $
+            # ;;                       log*sqrt(nflux2[si[img]]*nflux2[si[img+1]])] $
+            # ;            bins=[bins,nflux2[si[img]]+.01*(nflux2[si[img]]+nflux2[si[img+1]])]
+            #        if nflux[_si[_img]] ge bins[i] and $
+            # ;          nflux[_si[_img+1]] le nflux2[si[inext]] and $
+            #          nflux[_si[_img]] le nflux_bursts[si[inext]] and $
+            #          n_elements(where(nflux_bursts ge bins[i] and lastgap eq 0 and $
+            #          nflux_bursts le nflux[_si[_img+1]])) gt nperbin/2 then begin
+            #            bins=[bins,nflux[_si[_img]]+ $
+            #              .01*(nflux[_si[_img]]+nflux[_si[_img+1]])]
+            #            lastgap=1
+            #            if debug then print,fn,': gap edge bin ',i
+            #        endif else if lastgap eq 1 then begin
+            # ;          bins=[bins,nflux_bursts[si[img+1]]]
+            #          bins=[bins,nflux[_si[_img+1]]]
+            #          lastgap=0
+            #          if debug then print,fn,': gap other edge bin ',i
+            #        endif else $
+            #          bins=[bins,(1-log)*0.5*(nflux_bursts[si[inext-1]]+nflux_bursts[si[inext]]) + $
+            #                   log*sqrt(nflux_bursts[si[inext-1]]*nflux_bursts[si[inext]])]
+            #      endif $	; end block for gap checking
+            #
+            #      else $
+
+            # Set the upper limit for the next bin
+
+            bins = np.append(bins, (1 - _log) * 0.5 * (x_b[si[inext - 1]] + x_b[si[inext]]) +
+                             _log * np.sqrt(x_b[si[inext - 1]] * x_b[si[inext]]))
+
+            # If you've set a hard lower limit, you need to make sure the 2nd (and subsequent)
+            # bins are at larger values
+
+            if x_lim is not None:
+                assert bins[-1] > x_lim[0]
+
+            if x_add is not None:
+                inrange, ninrange, dummy = idlwhere((np.array(x_add) > bins[-2]) & (np.array(x_add) < bins[-1]))
+                if ninrange > 0:
+                    # Add a custom bin here
+                    bins[-1] = x_add[inrange[0]]
+                    inext = inext_old + len(np.where((x_b >= bins[-2]) & (x_b < bins[-1])))
+
+        inext_old = inext
+
+    return bins
+
+
+def calc_alpha(src, bc=[1.0, 0.0], nperbin=16, limit=None, custom=None,
+               filter=None, exclude_short=True, gap=False, log=False, s_z=False,
+               verify=False, debug=False):
+    """
+    This function calculates mean burst rates for a given source as well as
+    alphas etc. binned as a function of source flux
+
+    Copied from burst/minbar/analysis/calc_alpha.pro and converted to Python
+
+    The original routine returned a structure like this, where the entries in
+    square brackets are only when you run on multiple sources:
+     [ SRC        STRING Array[19] ]	Source list (excludes "deleted" sources)
+      BINS       FLOAT  Array[20]		Boundary values for gamma/S_Z bins
+      PBINS      FLOAT  Array[19]		Midpoint of each bin
+      PBINE      FLOAT  Array[19]		Half-width of each bin
+      N          INT    Array[19]		Number of bursts in each bin
+     [ N_SRC      INT    Array[19, 19] ]	Number of bursts per bin, per source
+     [ DUR_SRC    FLOAT  Array[19, 19] ]	Duration per source per bin (indexes
+                                          in that order!)
+      AVRATE     FLOAT     0.120416	Mean rate (/hr) for all bins
+      AVRATE_ERR FLOAT     0.00562668	Uncertainty on mean rate
+      RATE       FLOAT  Array[19]		Burst rate (/hr) per bin
+      RATE_ERR   FLOAT  Array[19]		Uncertainty on rate
+      ALPHA      FLOAT  Array[19]		Alpha per bin
+      ALPHA_ERR  FLOAT  Array[19]		Uncertainty on alpha
+     [ BADBURSTS  LONG   Array[5] ]	Bursts omitted because no gamma/S_Z val
+     [ BADOBS     LONG   Array[328] ]	Obs omitted because no gamma/S_Z val
+
+    Example usage:
+    res = minbar.calc_alpha('4U 1636-536', nperbin=50, limit=0.03, bc=1.51)
+    minbar.binplot(res['bins'], res['rate'], res['rate_err'],xrange=[0.01,0.5],yrange = [0.04,0.8])
+
+    :param src: source name to bin bursts
+    :param bc: Bolometric correction for alpha-calculation
+    :param nperbin:  Number of bursts per rate/alpha bin
+    :param limit: 1 or 2 element list giving the hard limits for binning
+    :param gap: Avoid big gaps within bins (not yet implemented)
+    :param log: Bin boundary is geometric mean rather than arithmetic mean
+    :param s_z: Plot vs. position on color-color diagram instead of flux
+    :param exclude_short: Exclude the short bursts (default: yes)
+    :param filter: Allows you to filter the observations, e.g. on some other parameter
+    :param verify: Check for completeness of the data
+    :param debug: Provide debugging information
+    """
+
+    fn = sys._getframe().f_code.co_name
+
+    eta = 1e-6
+    q = 0.5 * (1. - 0.68)  # confidence interval for errors
+    tdel_thresh = 1800. / 3600.  # [hr] threshold for short-recurrence time bursts
+
+    if s_z:
+        print('** WARNING ** binning on S_Z is not tested')
+        gap = False  # Gap won't work if we're using colors
+        log = False  # Better to do this in linear space
+
+    _filter=''
+    if filter is not None:
+        print('''
+** WARNING ** filtering on gamma produces inexplicably variable results,
+              and should probably be avoided''')
+        _filter = filter + ','
+
+    # Set bolometric correction for alpha-calculation
+
+    if not isinstance(bc,list):
+        bc=[bc]
+    _bc = bc[0]
+    if len(bc) > 1:
+        _bce = bc[1]
+    else:
+        _bce = 0.0
+
+    gflag = True  # Flag to tell if we have fedd defined for each source. If
+    #   True, then we bin using gammas; if False, we use fluxes
+
+    # ----------------------------------------------------------------------------
+    # Find the F_Edd value for the source
+    # I think this bit is redundant since we're only working with one source at at
+    # time
+
+    s = minbar.Sources()
+    fedd = None
+    if debug:
+        print('{}: extracting Eddington luminosity via get_FEdd'.format(fn))
+    s.name_like(src)
+    test = s['F_Edd']
+    if test > 0.:
+        fedd = test
+    s.clear()
+
+    # Check that all sources have an F_Edd value, and adjust if not
+
+    if (fedd is None):
+        print("{}: ** WARNING ** no F_Edd value for {}".format(fn, src))
+        return None
+
+    # ----------------------------------------------------------------------------
+    # Generate the list of bursts.
+
+    # print("{}: generating the list of bursts matching criteria {}".format(fn, criteria + filter))
+    print("{}: generating the list of bursts".format(fn))
+
+    # Build up the burst list
+
+    m = minbar.Bursts()
+
+    m.name_like(src)
+    m.unique()  # Eliminate the multiple bursts
+    lburst = m['entry']
+
+    # Exclude short recurrence-time bursts
+
+    if exclude_short:
+        _tdel = m['tdel'].data
+        good = np.where((_tdel == 0.0) | (_tdel > tdel_thresh))[0]
+        if len(lburst) > len(good):
+            print("{}: omitting {} of {} short del-t bursts".format(fn, len(lburst) - len(good), len(lburst)))
+            if len(good) > 0:
+                lburst = lburst[good]
+            else:
+                print('calc_alpha: exclude_short left no bursts')
+                lburst = []
+
+    n = len(lburst)
+
+    # Exclude bursts here where there are multiple active sources in the (RXTE)
+    # field
+
+    #  _o=obs_id(lburst,/nodup)
+    #  dbopen,!minbar_root+'/minbar-obs'
+    #  dbext,_o,'flag',_flag
+    #  conf=where((_flag and 2) gt 0,nconf,compl=_ok)
+    #  if nconf gt 0 then begin
+    #    print,nconf,n, $
+    #      format='("** WARNING ** omitting ",i4," of ",i4," bursts in confused fields")'
+    #    lburst=lburst[_ok]
+    #  endif
+
+    n = len(lburst)
+
+    # Extract the values on which to bin. Normally this is gamma, but if the
+    # S_Z flag is set, it will be s_z. (The variable is always called gamma, though)
+
+    # dbext,lburst,'name,gamma,fluen',name,gamma,fluen
+    name = m[lburst]['name'].data
+    gamma = m[lburst]['gamma'].data
+    fluen = m[lburst]['bfluen'].data
+    fluen_err = m[lburst]['e_bfluen'].data
+
+    if s_z:
+        gamma = m[lburst]['s_z'].data
+    #  name=strtrim(name,2)
+
+    # Now loop over the sources and check that there are bursts from this source
+    # This section is for where we are calculating the rate averaged over more
+    # than one source
+
+    #  for i=0,nsrc-1 do begin
+    # ;    _l=dbfind(criteria+'cat_num>0,type=1,flag<15,name='+src[i],/silent)
+    # ;    if _l[0] gt 0 then begin
+    # ;      if lburst[0] eq -1 then lburst=_l else lburst=[lburst,_l]
+    # ;    endif else begin
+    #    tmp=where(name eq src[i])
+    #    if tmp[0] eq -1 then $
+    #
+    # ; If we find no bursts for this source, we should remove it from the list!
+    # ; Or should we? I'm not sure. I think No.
+    #
+    #      print,fn,src[i], $
+    #        format='(a,": ** WARNING ** no bursts found for ",a," with these criteria")'
+    # ;    endelse
+    #  endfor
+
+    # Check the gamma values for the bursts
+
+    bad, nbad, good = idlwhere(gamma <= 0.)  # ,nbad,compl=nz)
+
+    if verify:
+        if nbad > 0:
+            print("{}: ** WARNING ** {}/{} burst gamma-values not set".format(fn, len(bad), n))
+
+        # Recalculate the gamma-values from minbar-obs, to check how up-to-date the
+        # values from MINBAR are
+
+        oid = m['entry_obs'].data
+
+        missing = np.where(oid <= 0)[0]  # ,nmissing)
+        if len(missing) > 0:
+            print("{}: ** WARNING ** {} bursts without matching observation in minbar-obs".format(fn, len(missing)))
+            print(lburst[missing])
+            if max(gamma[missing]) > 0.:
+                print(fn + ': ** ERROR ** burst with missing obs has non-zero gamma value (how?)')
+
+    # Extract all the burst parameters. The important parameters here are
+    #   lburst -> burst IDs, including those with no gamma values
+    #
+    # next three arrays are for the subset with non-zero gamma
+    #   name -> source name
+    #   gamma -> becomes binning parameter nflux_bursts for bursts (flux/gamma/s_z)
+    #   fluen -> integrated energy in burst (normalized if gflag=1)
+    #   n = final number of "good" bursts (i.e. with gamma[good]=nflux_bursts>0)
+
+    min_gamma = min(gamma[good])  # To calculate lower limit for obs
+
+    #  min_gamma=0.01	; special here (for 1636-536?)
+
+    # Here we limit to the number of bursts for which we have gamma values
+
+    nflux_bursts = gamma[good]  # Normalized flux for bursts, where applicable
+    fluen = fluen[good]
+    name = name[good]
+    n = len(good)
+
+    # Also clean up the various pointers
+
+    badbursts = lburst[bad]
+    lburst = lburst[good]
+
+    # ----------------------------------------------------------------------------
+    # Get the list of observations, as well as an F_Edd value for each obs
+    # appropriate for the source. This is so we can calculate gamma
+
+    obs_limit = [min_gamma * 0.9, 10.]
+
+    criteria = 'flag<1,'  # This eliminates observations with multiple active
+    #   sources in the FOV, observations with no good
+    #   times, and observations with no Standard 2 data
+    # see http://burst.sci.monash.edu/wiki/index.php?n=MINBAR.Minbar-obsColumn#flag
+    criteria = criteria + 'sig>3,fluxe>0,'
+
+    print("{}: generating the list of observations matching criteria {}".format(fn, criteria))
+
+    o = minbar.Observations()
+
+    o.name_like(src)
+    o.good()
+    lobs = o['entry']
+
+    # Now extract the relevant columns
+
+    #  dbext,lobs,'name,gamma,flux,s_z,exp',_name,gamma,flux,_s_z,dur
+    _name = o[lobs]['name'].data
+    gamma = o[lobs]['gamma'].data
+    flux = o[lobs]['flux'].data
+    flux_err = o[lobs]['e_flux'].data
+    _s_z = o[lobs]['s_z'].data
+    dur = o[lobs]['exp'].data
+
+    # Extract all the observation parameters. The important parameters here are
+    #   flux -> binning param nflux for observations (flux/ofedd,s_z or just flux)
+    #        -> also (appropriately rescaled) flux value, nflux3; e.g. for s_z
+    #             may be different from nflux!
+    #   dur -> duration of each observation
+    #   oid -> corresponding observation id (may have two columns!)
+    #   badbursts -> list of IDs for those bursts without a gamma value
+    # Here we extract our binning parameter, as well as the (appropriately
+    # normalized) source flux
+
+    #  if gflag then nflux3=flux/ofedd else nflux3=flux
+    if s_z:
+        nflux = _s_z
+    else:
+        if gflag:
+            nflux = gamma
+        else:
+            nflux = flux
+
+    bad, nbad, nz = idlwhere(nflux <= 0.)
+    if verify and (not s_z):
+        if nbad > 0:
+            print("{}: ** WARNING ** {}/{} obs flux/gamma-values not set".format(fn, nbad, len(lobs)))
+
+    # Now that we have a maximal set of fluxes, select the "good" observations here
+
+    gfl, nobs, oexcl = idlwhere((nflux > obs_limit[0])
+                                & (nflux < obs_limit[1]))  # Good fluxes, was tmp
+
+    if len(oexcl) > 0:
+        print("{}: ** WARNING ** excluded {} observations based on gamma".format(fn, len(oexcl)))
+    # if debug and (limit_low) and (not s_z):
+    #     print('** WARNING ** omitting observations with gamma/s_z < {}'.format(min_gamma*0.9))
+    if nobs == 0:
+        print('{}: ** WARNING ** can''t calculate rates, no valid fluxes'.format(fn))
+        return None
+
+    # done up to here
+
+    badobs = []
+    if len(nflux) > nobs:
+        #    bad=where(nflux le 0.0)
+        bad = np.where(nflux < obs_limit[0])[0]
+        if s_z:
+            print("{}: Omitting {} of {} observations for binning (on S_Z)".format(fn, len(bad), len(nflux)))
+        else:
+            print("{}: Omitting {} of {} observations for binning (on flux/gamma)".format(fn, len(bad), len(nflux)))
+        badobs = lobs[bad]
+
+    # Now reduce the arrays to the good values
+
+    nflux = nflux[gfl]
+    dur = dur[gfl]
+    _name = _name[gfl]
+    lobs = lobs[gfl]
+
+    # ----------------------------------------------------------------------------
+    # Now we actually do the binning.
+
+    bins = generate_bins(nflux_bursts, nflux, nperbin=nperbin, x_lim=limit, x_add=custom)
+    nbins = len(bins)
+    nb = np.zeros(nbins)
+    nb_lo = np.zeros(nbins)
+    nb_hi = np.zeros(nbins)
+    yall = np.zeros(nbins)
+    rateall = np.zeros(nbins)
+    rateall_lo = np.zeros(nbins)
+    rateall_hi = np.zeros(nbins)
+    alpha = np.zeros(nbins)
+    alpha_err = np.zeros(nbins)
+    alpha_err_lo = np.zeros(nbins)
+    alpha_err_hi = np.zeros(nbins)
+
+    # Assign the bursts, and observations, to each bin
+
+    ind_b = np.searchsorted(bins, nflux_bursts, side='right')
+
+    ind_o = np.searchsorted(bins, nflux, side='right')
+
+    # And loop over the bins to calculate the rate etc.
+
+    for i in range(nbins):
+
+        if debug:
+            print(i, bins[i + 1])
+
+        # Find all the bursts that fall into this bin. If we are using more than
+        # one source, split up the results per source
+
+        gb, ngb, dummy = idlwhere(ind_b == i + 1)
+        if ngb > 0:
+            nb[i] = ngb
+
+            nb_lo[i] = scipy.special.gammaincinv(nb[i] + 1, q)
+            nb_hi[i] = scipy.special.gammaincinv(nb[i] + 1, 1. - q)
+
+            # What if we have a few zero fluences? This should work fine for either
+            # gflag=1 or 0, since in the former case we're using U_b
+
+            bad, nbad, nz = idlwhere(fluen[gb] <= 0.0)
+            if nbad > 0:
+                print("{}: ** WARNING ** one or more zero fluences for bin {}, attempting to correct...".format(
+                    fn, i))
+                mfluen = np.mean(fluen[gb[nz]])
+                fluen[gb[bad]] = np.zeros(len(bad)) + mfluen
+                print("{}: replaced {} of {} fluence values with bin mean of {}e-9 ergs/cm^2".format(
+                    fn, len(bad), len(gb), mfluen))
+                # print(nb[i], fluen[gb])
+
+        # Now accumulate the burst IDs in this bin. Need to check the size here, and
+        # expand the array if need be
+
+        # _s=np.shape(bin_id)
+        # if _s[1] < nb[i]:
+        #     _bin_id=np.zeros((nbins,nb[i]))
+        #     _bin_id[:,0:_s[1]-1]=bin_id
+        #     bin_id=_bin_id
+
+        # bin_id[i,0:nb[i]-1] = lburst[gb]
+
+        # Find all the observations that fall into this bin
+
+        g, ng, dummy = idlwhere(ind_o == i + 1)
+        if ng > 0:
+            # Calculate the rate and error, and alpha and error
+
+            yall[i] = sum(dur[g] / 1000.)  # Duration in ks
+            rateall[i] = (nb[i]) / (yall[i] / 3.6)
+            # Gaussian version
+            #      ratealle[i]=max([1.,sqrt(float(nb[i]))])/(yall[i]/3.6)
+            # Define instead asymmetric errors
+            # print (k,scipy.special.gammaincinv(k+1,q),scipy.special.gammaincinv(k+1,1.-q))
+
+            rateall_lo[i] = rateall[i] - scipy.special.gammaincinv(nb[i] + 1, q) / (yall[i] / 3.6)
+            rateall_hi[i] = scipy.special.gammaincinv(nb[i] + 1, 1. - q) / (yall[i] / 3.6) - rateall[i]
+
+            # print (nb[i], ng, rateall[i], rateall_lo[i], rateall_hi[i])
+
+            # Calculate the alpha value and error
+
+            flux_int = sum(dur[g] * flux[g]) * _bc
+            fluen_sum = sum(fluen[gb]) * 1e3
+            alpha[i] = flux_int / fluen_sum
+            # alpha_err[i] = alpha[i]/sqrt(float(nb[i]))
+            alpha_err[i] = np.sqrt(sum((dur[g] * _bc / fluen_sum) ** 2 * flux_err[g] ** 2)
+                                   + sum((flux_int / fluen_sum ** 2) ** 2 * (fluen_err[gb[nz]]*1e3) ** 2))
+            # Factor in the Poisson uncertainties here
+            alpha_err_lo[i] = np.sqrt( alpha_err[i]**2 + alpha[i]**2*((nb[i]-nb_lo[i])/nb[i])**2 )
+            alpha_err_hi[i] = np.sqrt( alpha_err[i]**2 + alpha[i]**2*((nb_hi[i]-nb[i])/nb[i])**2 )
+
+    # return everything
+
+    return {'bins': bins, 'n': nb, 'rate': rateall, 'rate_err': (rateall_lo, rateall_hi),
+            'badbursts': badbursts, 'alpha': alpha, 'alpha_err': (alpha_err_lo, alpha_err_hi) }
+
+
+def binplot(bins, rate, rate_err, panel=None, pbins=None,
+            log=True, xrange=[0.009, 0.99], yrange=[0.05, 2],
+            color='green', noxlab=False, bc=1.0, ylabel='Burst rate (hr$^{-1}$)'):
+    '''This is the replacement for the IDL version of binplot, part of
+    analysis/burst_rate.pro
+    To get the right behaviour, we need to use matplotlib's step routine,
+    with option "post", and duplicate the last (non-zero) value of the
+    rate array
+    There are also a limited number of options for controlling the plot
+    appearance, including the option to omit the x-labels for stacked plots
+    (noxlab = True)'''
+
+    if panel is None:
+        panel = plt.plot()
+
+    # Bolometric correction is handled in the gamma-calculation stage, now
+
+    #    assert (r['bc'] == 1)
+
+    #    y=r['rate'][0] # burst rate array
+    y = rate
+    y = y[np.nonzero(y)]
+    y = np.append(y, y[-1])  # augment by one for step plot
+    #    print (y)
+
+    nbins = len(y)
+
+    # Generate the bin midpoints for plotting
+
+    if pbins is None:
+        if log:
+            pbins = np.sqrt(bins[1:nbins] * bins[0:nbins - 1])
+        else:
+            pbins = 0.5 * (bins[1:nbins] + bins[0:nbins - 1])
+
+    #    bins=r['bins'][0][0:nbins]*bc # bins for step plot
+
+    #    pbins=r['pbins'][0][0:nbins-1]*bc # where to plot symbols (with errors)
+    #    rate_err=[r['rate_err_lo'][0][0:nbins-1]*bc,r['rate_err_hi'][0][0:nbins-1]*bc]
+
+    # need to modify the length of the rate_err tuples here to omit the last
+    # bin
+
+    asym_errors = False
+    if isinstance(rate_err, tuple):
+        asym_errors = True
+        rate_lo, rate_hi = rate_err
+        # Define a combined rate "array-like" of shape(2,N): Separate - and + values for each bar.
+        # First row contains the lower errors, the second row contains the upper errors.
+        _rate_err = (rate_lo[0:nbins - 1], rate_hi[0:nbins - 1])
+        # print (np.shape(_rate_err))
+        lim = np.logical_and(rate <= 0.0, rate_hi > 0.0)
+        # print(lim)
+    else:
+        _rate_err = rate_err[0:nbins - 1]
+        lim = []
+
+    #    print (nbins)
+    #    y=np.append(r['rate'][0],r['rate'][0][nbins-1])
+    #    print (r['rate'][0],y)
+
+    #    plt.step(r['pbins'][0],r['rate'][0][0:nbins])
+    #    print (len(bins),len(y))
+    plt.step(bins[0:nbins], y, where='post', color=color)
+
+    # Plot the points with errorbars, if pbins is defined
+
+    try:
+        plt.errorbar(pbins[0:nbins - 1], rate[0:nbins - 1], yerr=_rate_err,
+                     fmt='o', color=color)
+        # Plot the limits
+
+        if np.any(lim):
+            plt.errorbar(pbins[lim], rate_hi[lim],
+                         yerr=0.3 * rate_hi[lim], uplims=True, fmt='o', color=color)
+            tmp = np.where(lim)[0][0]
+            #        print (pbins[lim],rate_hi[lim],tmp,type(tmp))
+
+            plt.plot(bins[tmp:tmp + 2], np.array([rate_hi[tmp], rate_hi[tmp]]),
+                     '-', color=color)
+
+            plt.plot(pbins[lim], rate_hi[lim], '.')
+
+    except:
+        pass
+
+    plt.xlim(xrange)
+    plt.ylim(yrange)
+
+    # plt.xlabel('Accretion rate $\dot{m}/\dot{m}_{\rm Edd}$')
+    if noxlab == False:
+        plt.xlabel('Accretion rate $\dot{m}/\dot{m}_\mathrm{Edd}$')
+
+    if log:
+        plt.xscale('log')
+        plt.yscale('log')
+    plt.ylabel(ylabel)
+

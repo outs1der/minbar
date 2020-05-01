@@ -354,6 +354,43 @@ class Minbar(IDLDatabase):
         self.ind = np.where(self.selection)[0][self.time_order]
         logger.info('Selected {} {}s'.format(len(np.where(self.selection)[0]), self.entryname))
 
+    def exclude(self, name):
+        """
+        Removes source with given name from the current selection.
+        """
+        selection = np.logical_not(self.records.field('name') == name)
+        self.selection = np.logical_and(self.selection, selection)
+        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
+        self.ind = np.where(self.selection)[0][self.time_order]
+        logger.info('Selected {} {}s by excluding {}'.format(len(np.where(self.selection)[0]), self.entryname, name))
+
+    def exclude_like(self, name):
+        """
+        Like exclude, but get the name from get_name_like().
+        If multiple names are found, the first is excluded
+        and the rest are reported.
+        """
+        names = self.get_name_like(name)
+        if not names:
+            logger.info('No matching source')
+        else:
+            self.exclude(names[0])
+
+            if len(names) > 1:
+                logger.info('{} more matching sources: {}'.format(len(names) - 1, ', '.join(names[1:])))
+
+    def exclude_flag(self, flags):
+        """
+        Removes entries with flags matching one or more labels from the current selection.
+        """
+        selection = [re.search('['+flags+']',x) is None for x in self.records['sflag']]
+        self.selection = np.logical_and(self.selection, selection)
+        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
+        if len(np.where(self.selection)[0]) < len(self.ind):
+            logger.info('Excluded {} {}s by excluding flag(s) {}'.format(len(self.ind)-len(np.where(self.selection)[0]),
+                    self.entryname, flags))
+        self.ind = np.where(self.selection)[0][self.time_order]
+
 
 class Bursts(Minbar):
     """
@@ -401,32 +438,24 @@ class Bursts(Minbar):
             self.type = None
         self.clear()
 
-    
-    def exclude(self, name):
+
+    def unique(self):
         """
-        Removes source with given name from the current selection.
+        Removes multiply-observed bursts, with a priority for XTE
         """
-        selection = np.logical_not(self.records.field('name') == name)
+        instr_label = [x[0:2] for x in self['instr']]
+        set_instr_label = set(instr_label)
+        if len(set_instr_label.difference({'IJ','SW','XP'})) > 0:
+            logger.error('unique filtering may not function correctly with additional instruments')
+
+        selection = np.logical_or(self.records.field('mult') == 1,
+                                  np.char.array(self.records['instr']).startswith('XP'))
         self.selection = np.logical_and(self.selection, selection)
+
         self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
+        logger.info('Selected {} unique {}s by excluding {}'.format(len(np.where(self.selection)[0]),
+                self.entryname, len(self.ind)-len(np.where(self.selection)[0])))
         self.ind = np.where(self.selection)[0][self.time_order]
-        logger.info('Selected {} {}s by excluding {}'.format(len(np.where(self.selection)[0]), self.entryname, name))
-
-
-    def exclude_like(self, name):
-        """
-        Like exclude, but get the name from get_name_like().
-        If multiple names are found, the first is excluded
-        and the rest are reported.
-        """
-        names = self.get_name_like(name)
-        if not names:
-            logger.info('No matching source')
-        else:
-            self.exclude(names[0])
-            
-            if len(names)>1:
-                logger.info('{} more matching sources: {}'.format(len(names) - 1, ', '.join(names[1:])))
 
 
     def __str__(self):
@@ -434,7 +463,8 @@ class Bursts(Minbar):
         Return a nice string.
         """
         return "Multi-INstrument Burst ARchive (MINBAR) ({} {}s from {} sources)".format(len(self.records), self.entryname, len(self.names))
-    
+
+
     def has_error(self, field):
         """
         Return if there exists a field with error
@@ -442,6 +472,7 @@ class Bursts(Minbar):
         """
         error_name = self.get_error_name(field)
         return error_name in self.field_names
+
 
     def is_error(self, field):
         """
@@ -452,6 +483,7 @@ class Bursts(Minbar):
             return field[:-1] in self.field_names
         else:
             return False
+
 
     def get_error(self, field):
         """
@@ -464,14 +496,16 @@ class Bursts(Minbar):
             return self.get(self.get_error_name(field))
         else:
             return np.zeros(len(self.get(field)))
-    
+
+
     def get_error_name(self, field):
         """
         Return the name of the field containing the
         error for field.
         """
         return field + 'e'
-    
+
+
     def create_distance_correction(self):
         """
         Create an array of distance corrections, 4 pi d^2, for each burst.
@@ -558,6 +592,19 @@ class Observations(Minbar):
         self.type = type
         self.clear()
 
+    def good(self):
+        """
+        Filter for only the "good" observations, excluding bad flags and non detections
+        :return:
+        """
+        self.exclude_flag('bcdefg')
+        selection = (self.records['flux'] > 3.*self.records['e_flux']) & (self.records['sig'] >= 3.)
+        self.selection = np.logical_and(self.selection, selection)
+        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
+        if len(np.where(self.selection)[0]) < len(self.ind):
+            logger.info('Restricted to {} "good" {}s by also excluding nondetections'.format(
+                len(np.where(self.selection)[0]), self.entryname))
+        self.ind = np.where(self.selection)[0][self.time_order]
 
     def __str__(self):
         """
