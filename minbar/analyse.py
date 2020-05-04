@@ -838,12 +838,19 @@ def calc_alpha(src, bc=None, nperbin=16, limit=None, custom=None,
 
     s = minbar.Sources()
     fedd = None
-    if debug:
-        print('{}: extracting Eddington luminosity via get_FEdd'.format(fn))
-    s.name_like(src)
-    test = s['F_Edd']
-    if test > 0.:
-        fedd = test
+    if s.local_files:
+        if debug:
+            print('{}: extracting Eddington luminosity via get_FEdd'.format(fn))
+        s.name_like(src)
+        test = s['F_Edd']
+        if test > 0.:
+            fedd = test
+
+    # Check that all sources have an F_Edd value, and adjust if not
+
+    if (fedd is None):
+        print("{}: ** WARNING ** no F_Edd value for {}".format(fn, src))
+        # return None
 
     # Get the anisotropy factor
 
@@ -853,12 +860,6 @@ def calc_alpha(src, bc=None, nperbin=16, limit=None, custom=None,
         aniso_fac = minbar.ANISOTROPY['non-dipper'][1] / minbar.ANISOTROPY['non-dipper'][0]
 
     s.clear()
-
-    # Check that all sources have an F_Edd value, and adjust if not
-
-    if (fedd is None):
-        print("{}: ** WARNING ** no F_Edd value for {}".format(fn, src))
-        return None
 
     # ----------------------------------------------------------------------------
     # Generate the list of bursts.
@@ -960,6 +961,14 @@ def calc_alpha(src, bc=None, nperbin=16, limit=None, custom=None,
                 print(lburst[missing])
             if (max(gamma[missing]) > 0.) and verbose:
                 print(fn + ': ** ERROR ** burst with missing obs has non-zero gamma value (how?)')
+
+    if len(good) == 0:
+        # There are no good gamma values, so we have to fall back to the flux
+        if verbose:
+            minbar.logger.warning('no good gamma values, so falling back on the flux')
+        gflag = False
+        gamma = m[lburst]['pflux'].data * _bc * aniso_fac
+        bad, nbad, good = idlwhere(gamma <= 0.)  # ,nbad,compl=nz)
 
     # Extract all the burst parameters. The important parameters here are
     #   lburst -> burst IDs, including those with no gamma values
@@ -1174,7 +1183,7 @@ def calc_alpha(src, bc=None, nperbin=16, limit=None, custom=None,
     # return everything
 
     result =  {'src': src, 'minbar_version': minbar.VERSION, 'date': minbar.DATE,
-               'conf': conf, 'bc': _bc, 'aniso': aniso_fac, 'nperbin': nperbin,
+               'conf': conf, 'bc': (_bc, _bce), 'aniso': aniso_fac, 'nperbin': nperbin,
                'bins': bins, 'n': nb, 'rate': rateall, 'rate_err': (rateall_lo, rateall_hi),
                'alpha': alpha, 'alpha_err': (alpha_err_lo, alpha_err_hi),
                'id': lburst, 'id_obs': lobs, 'badbursts': badbursts, 'badobs': badobs,

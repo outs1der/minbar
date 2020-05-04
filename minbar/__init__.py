@@ -835,6 +835,7 @@ class Sources:
         if filename==None:
             filename = self.get_default_path()
         self._f = fits.open(filename)
+        self.header = self._f[1].header
         self.field_names = [i.lower() for i in self._f[1].data.dtype.names]
         self.field_labels = self._get_field_labels()
         self._fits_names = list(self.field_names) # Keep track of which fields are in fits file
@@ -844,7 +845,20 @@ class Sources:
         self.field_labels['dist'] = 'Distance (kpc)'
         self.field_labels['diste'] = 'Error on distance (kpc)'
 
-        self.F_Edd, self.F_Edd_err = self.get_F_Edd()
+        # Extract the version information
+
+        version_string = [x for x in self.header['history'] if re.search('minbar_sources.fits', x)][0]
+        self.version = version_string[26:]
+
+        # Get the Eddington flux information. This step is kind of a hack since
+        # the fluxes should really be included in the source FITS file.
+
+        F_Edd = self.get_F_Edd()
+        if F_Edd is None:
+            self.local_files = False
+        else:
+            self.local_files = True
+            self.F_Edd, self.F_Edd_err = F_Edd
 
 
     def get_default_path(self):
@@ -858,15 +872,14 @@ class Sources:
         """
         Get the field labels from the comment fields in the fits header
         """
-        header = self._f[1].header
-        columns = [field[5:] for field in header if field.startswith('TTYPE')]
+        columns = [field[5:] for field in self.header if field.startswith('TTYPE')]
         field_labels = {}
         for column in columns:
-            label = header.get('TCOMM'+column, header['TTYPE'+column])
-            unit = header.get('TUNIT'+column, '')
+            label = self.header.get('TCOMM'+column, self.header['TTYPE'+column])
+            unit = self.header.get('TUNIT'+column, '')
             if unit:
                 label = '{} ({})'.format(label, unit)
-            field_labels[header['TTYPE'+column].lower()] = label
+            field_labels[self.header['TTYPE'+column].lower()] = label
         return field_labels
 
 
@@ -945,6 +958,7 @@ class Sources:
         self.EddingtonFluxes = MINBAR_ROOT + '/EddingtonFluxes.dat'
         if not os.path.isfile(self.EddingtonFluxes):
             logger.warning('can\'t read file {}, Eddington flux values unavailabile'.format(self.EddingtonFluxes))
+            return None
 
         d = pd.read_csv(self.EddingtonFluxes, header=None, engine='python',
                         names=["BursterNo", "SourceName", "RXTEname", "F_Edd", "F_Edd_Err", "Chisqdf",
@@ -1062,6 +1076,20 @@ class Sources:
                 dist[i] = distances[name][0]
                 diste[i] = distances[name][1]
         return dist, diste
+
+    def __str__(self):
+        """
+        Display some information about this object
+        The "local files" option refers to auxiliary information including the
+        list of Eddington fluxes, which is not part of the online dataset
+        :return:
+        """
+        available = ['unavailable','present']
+        return """Multi-INstrument Burst ARchive (MINBAR) source table v{}
+{} sources ({} with bursts in MINBAR)
+
+Local files: {}""".format( self.version, len(self), len(np.where(self['nburst'] > 0)[0]),
+                           available[int(self.local_files)])
 
 
 class Instrument:
