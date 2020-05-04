@@ -3,7 +3,8 @@
 import numpy as np
 from scipy.signal import correlate
 import scipy.special
-import sys
+import os, sys
+import pickle
 import minbar
 import matplotlib.pyplot as plt
 
@@ -747,8 +748,8 @@ def generate_bins(x_b, x_o, nperbin=10, log=True, x_lim=None, x_add=None):
 
 
 def calc_alpha(src, bc=None, nperbin=16, limit=None, custom=None,
-               filter=None, exclude_short=True, gap=False, log=False, s_z=False,
-               verify=False, debug=False, verbose=True):
+               filter=None, exclude_short=True, gap=False, log=False, s_z=False, conf=0.68,
+               verify=False, debug=False, verbose=True, write=False, clobber=False):
     """
     This function calculates mean burst rates for a given source as well as
     alphas etc. binned as a function of source flux
@@ -787,14 +788,17 @@ def calc_alpha(src, bc=None, nperbin=16, limit=None, custom=None,
     :param s_z: Plot vs. position on color-color diagram instead of flux
     :param exclude_short: Exclude the short bursts (default: yes)
     :param filter: Allows you to filter the observations, e.g. on some other parameter
+    :param conf: Confidence level for uncertainties
     :param verify: Check for completeness of the data
     :param debug: Provide debugging information
+    :param write: Save the analysis results to a (pickle) file
+    :param clobber: Force overwrite of the save file
     """
 
     fn = sys._getframe().f_code.co_name
 
     eta = 1e-6
-    q = 0.5 * (1. - 0.68)  # confidence interval for errors
+    q = 0.5 * (1. - conf)  # confidence interval for errors
     tdel_thresh = 1800. / 3600.  # [hr] threshold for short-recurrence time bursts
 
     if s_z:
@@ -1120,12 +1124,13 @@ def calc_alpha(src, bc=None, nperbin=16, limit=None, custom=None,
 
             bad, nbad, nz = idlwhere(fluen[gb] <= 0.0)
             if nbad > 0:
-                print("{}: ** WARNING ** one or more zero fluences for bin {}, attempting to correct...".format(
-                    fn, i))
                 mfluen = np.mean(fluen[gb[nz]])
                 fluen[gb[bad]] = np.zeros(len(bad)) + mfluen
-                print("{}: replaced {} of {} fluence values with bin mean of {}e-9 ergs/cm^2".format(
-                    fn, len(bad), len(gb), mfluen))
+                if verbose:
+                    print("{}: ** WARNING ** one or more zero fluences for bin {}...".format(
+                        fn, i))
+                    print("{}: replaced {} of {} fluence values with bin mean of {}e-9 ergs/cm^2".format(
+                        fn, len(bad), len(gb), mfluen))
                 # print(nb[i], fluen[gb])
 
         # Find all the observations that fall into this bin
@@ -1168,11 +1173,26 @@ def calc_alpha(src, bc=None, nperbin=16, limit=None, custom=None,
 
     # return everything
 
-    return {'src': src, 'bins': bins, 'n': nb, 'rate': rateall, 'rate_err': (rateall_lo, rateall_hi),
-            'bc': _bc, 'alpha': alpha, 'alpha_err': (alpha_err_lo, alpha_err_hi),
-            'id': lburst, 'id_obs': lobs, 'badbursts': badbursts, 'badobs': badobs,
-            'bin_id': bin_id, 'bin_oid': bin_oid }
+    result =  {'src': src, 'minbar_version': minbar.VERSION, 'date': minbar.DATE,
+               'conf': conf, 'bc': _bc, 'aniso': aniso_fac, 'nperbin': nperbin,
+               'bins': bins, 'n': nb, 'rate': rateall, 'rate_err': (rateall_lo, rateall_hi),
+               'alpha': alpha, 'alpha_err': (alpha_err_lo, alpha_err_hi),
+               'id': lburst, 'id_obs': lobs, 'badbursts': badbursts, 'badobs': badobs,
+               'bin_id': bin_id, 'bin_oid': bin_oid }
 
+    # Optionally save the results to a pickle file. You can read this in as follows:
+    # import pickle
+    # result = pickle.load( open( "4U 1608-522_rate.p", "rb" ) )
+    if write:
+        file = src+'_rate.p'
+        if os.path.isfile(file) and not clobber:
+            minbar.logger.warning('savefile exists, and clobber=False; skipping save')
+        else:
+            if verbose:
+                print('{}: writing rate, alpha values to file {}'.format(fn, file))
+            pickle.dump(result, open(file, "wb"))
+
+    return result
 
 def binplot(bins, rate, rate_err, panel=None, pbins=None,
             log=True, xrange=[0.009, 0.99], yrange=[0.05, 2],

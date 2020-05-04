@@ -30,6 +30,7 @@ from astropy.io import fits
 from astropy.io import ascii
 import astropy.units as u
 from astropy.time import Time
+from datetime import datetime
 import logging
 import sys
 
@@ -37,6 +38,11 @@ import matplotlib.pyplot as plt
 
 # kpc = 3.086e21 # cm
 kpc = u.kpc.to('cm') # cm
+
+# Record the version and current date for analysis timestamps
+
+VERSION = 1.0
+DATE = datetime.now()
 
 # Local paths for MINBAR data; you need to update this when installing
 # on a new system
