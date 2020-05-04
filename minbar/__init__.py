@@ -12,7 +12,7 @@ should be placed in the 'data' subdirectory of this package.
 The table and attribute descriptions, and the data analysis procedures,
 are all described in the accompanying paper:
 The Multi-INstrument Burst ARchive (MINBAR), by D.K. Galloway et al. (the
-MINBAR Collaboration) 2020, accepted to ApJS; preprint at
+MINBAR Collaboration) 2020, accepted by ApJS; preprint at
 https://arxiv.org/abs/2003.00685
 
 (c) 2020, Duncan Galloway duncan.galloway@monash.edu & Laurens Keek,
@@ -26,8 +26,7 @@ from .analyse import *
 import numpy as np
 import pandas as pd
 import os, re
-from astropy.io import fits
-from astropy.io import ascii
+from astropy.io import fits, ascii
 import astropy.units as u
 from astropy.time import Time
 from datetime import datetime
@@ -121,28 +120,17 @@ BOL_CORR = {'4U 0513-40':         (1, 1.47, 0.02),
 ANISOTROPY = {'non-dipper': (0.898, 0.809),
               'dipper': (1.639, 7.27)}
 
-# List of ultra compacts from In 't Zand (2007) (1850-087 and 1905+000 no bursts in MINBAR)
-# Includes all candidates. Should I add 1728?
-# Should generate this list dynamically based on the type code --- dkg
-UCXBS = ['4U 0513-40',
-         '4U 0614+09',
-         '2S 0918-549',
-         '4U 1246-588',
-         '4U 1705-32', # = 1RXS J170854.4-321957
-         'SAX J1712.6-3739',
-         'RX J1718.4-4029',
-         '4U 1722-30',
-         'SLX 1735-269',
-         'SLX 1737-282',
-         'SLX 1744-300',
-         '4U 1812-12',
-         '4U 1820-303',
-         'XB 1832-330',
-         '4U 1850-086',
-         '1905+000', # no bursts in MINBAR
-         'XB 1916-053',
-         '4U 2129+12',
-         ]
+# List of ultra compacts based on In 't Zand (2007)
+# Includes all candidates.  Updated as of MINBAR source list v2.6
+# Should generate this list dynamically based on the type code, but not sure how to --- dkg
+UCXBS = ['4U 0513-40', '4U 0614+09', '2S 0918-549', '4U 1246-588',
+           '4U 1543-624', 'IGR J17062-6143', '4U 1705-32',
+           'XTE J1709-267', 'SAX J1712.6-3739', 'RX J1718.4-4029',
+           'IGR J17254-3257', '4U 1722-30', '4U 1728-34', 'SLX 1735-269',
+           'SLX 1737-282', 'IGR J17464-2811', 'SLX 1744-299',
+           'XMMU J181227.8-181234', '4U 1812-12', '4U 1820-303',
+           'XB 1832-330', '4U 1850-086', 'XB 1905+000', 'XB 1916-053',
+           'M15 X-2']
 
 def create_logger():
     """
@@ -900,7 +888,7 @@ class Sources:
         else: # If not in the fits file, see if it is an attribute
             data = getattr(self, field)
         
-        if all or self.selection==None:
+        if all or self.selection is None:
             return data
         else:
             return data[self.selection]
@@ -912,6 +900,28 @@ class Sources:
         """
         return self.get(field)
 
+    def type(self, types):
+        """
+        Select only objects matching a particular type code
+        :param types:
+        :return:
+        """
+        type_names = {'atoll': 'A', 'atolls': 'A', 'ultracompact': 'C', 'UCXB': 'C', 'dipper': 'D',
+                      'dippers': 'D', 'eclipsing': 'E', 'globular': 'G', 'cluster': 'G',
+                      'intermittent': 'I', 'microquasar': 'M', 'oscillation': 'O', 'pulsar': 'P',
+                      'pulsars': 'P', 'radio': 'R', 'superburst': 'S', 'transient': 'T',
+                      'transients': 'T', 'burster': 'B', 'bursters': 'B'}
+        if types in type_names:
+            types=type_names[types]
+
+        src_types = self._f[1].data['type']
+        sel = np.array([types[:1] in x for x in src_types])
+        for type in types[1:]:
+            sel = (sel & [type in x for x in src_types])
+
+        self.selection = sel
+
+        return len(np.where(sel)[0])
 
     def get_name_like(self, name):
         """
