@@ -1,0 +1,84 @@
+#!/bin/csh
+
+rm -f anainput.txt instr.txt mjd.txt ana.out ana.plot.out
+
+if ( $#argv > 3 ) then
+  set mt=$4
+else
+  set mt=300.
+endif
+
+if ( $#argv > 4 ) then
+  set chid=$5
+else
+  set chid=0.0001
+endif
+
+if ( $#argv > 5 ) then
+  set shard=$6
+else
+  set shard=-100.
+endif
+
+if ( $#argv > 6 ) then
+  set hardstart=$7
+else
+  set hardstart=-1.E10
+endif
+
+grep -v INDEF DATA/$1/$2 > anainput.txt
+echo $3 $mt $chid $shard $hardstart > instr.txt
+echo $2 > mjd.txt
+./ananew > ana.out
+set source1=`cat ana.out | grep Results |  awk '{print $2}'`
+set source2=`cat ana.out | grep Results |  awk '{print $3}'`
+set starttime=`cat ana.out | grep Results |  awk '{printf "%16.6f" , $5}'`
+set decaytime=`cat ana.out | grep Results | tail -1 | awk '{printf "%15.5f" , $11}'`
+set decaytimee=`cat ana.out | grep Results | tail -1 | awk '{printf "%15.5f" , $12}'`
+set plindex=`cat ana.out | grep Results | tail -1 | awk '{printf "%15.5f" , $7}'`
+set plindexe=`cat ana.out | grep Results | tail -1 | awk '{printf "%15.5f" , $8}'`
+set chi=`cat ana.out | grep Results | tail -1 | awk '{printf "%15.5f" , $22}'`
+set chi2=`cat ana.out | grep Results | tail -1 | awk '{printf "%15.5f" , $25}'`
+set ib2=`cat ana.out | grep Results | tail -1 | awk '{printf "%15.5f" , $23}'`
+
+grep Results ana.out >> fit.out
+
+set nf=`grep Problem ana.out | wc -l | awk '{printf "%4i" , $1}'`
+if ( $nf > 0 ) then
+    echo $2 problematic >> problems.out
+endif
+
+echo $2 > plottitel.txt
+if ($3 == '1' ) then
+  echo WFC >> plottitel.txt
+  if ( $source2 == '17+2' ) then
+    set mt=400.
+  endif
+endif
+if ($3 == '2' ) then
+  echo PCA >> plottitel.txt
+endif
+if ($3 == '3' ) then
+  echo JEM-X >> plottitel.txt
+endif
+if ($3 == '4' ) then
+  echo Nustar >> plottitel.txt
+endif
+if ($3 == '5' ) then
+  echo Swift-XRT >> plottitel.txt
+endif
+echo $decaytime >> plottitel.txt
+echo $decaytimee >> plottitel.txt
+echo $starttime >> plottitel.txt
+echo $source1 $source2 >> plottitel.txt
+echo $mt >> plottitel.txt
+echo $plindex >> plottitel.txt
+echo $plindexe >> plottitel.txt
+echo $chi >> plottitel.txt
+echo $chi2 >> plottitel.txt
+echo $ib2 >> plottitel.txt
+/opt/local/itt/idl82/bin/idl runidl
+mv fit.ps $2_fit.ps
+
+rm -f anainput.txt instr.txt mjd.txt ana.out ana.plot.out plottitel.txt tt.out 
+
