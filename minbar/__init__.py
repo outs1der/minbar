@@ -47,6 +47,7 @@ DATE = datetime.now()
 # on a new system
 
 MINBAR_ROOT = '/Users/Shared/burst/minbar'
+LOCAL_DATA = True
 
 # Bytearr entries are for consistency between the IDL and ASCII
 # versions of the data
@@ -237,6 +238,8 @@ class Minbar(IDLDatabase):
 
         # Define an index; see https://docs.astropy.org/en/stable/table/indexing.html
         self.records.add_index('entry')
+
+        # Also want to determine if we have local data
 
 
     def fix_labels(self):
@@ -498,6 +501,39 @@ class Bursts(Minbar):
             self.type = None
         self.clear()
 
+    def get_lc(self, id, pre=16., post=None):
+        """
+        Preliminary routine to return the lightcurve corresponding to a burst
+        Later this should probably be incorporated into a Burst object or similar
+        Usage:
+        b = minbar.Bursts()
+        mjd, rate, error = b.get_lc(2257)
+        :param id: Burst ID to retrieve
+        :param pre: pre-burst interval (in seconds) to include
+        :param post: post-burst interval (in seconds) to include
+        :return:
+        """
+
+        if LOCAL_DATA:
+            # Try to get the file locally
+            oid = self[id]['entry_obs']
+            t0 = self[id]['time']
+            if post is None:
+                post = 5. * self[id]['dur']
+
+            o = minbar.Observations()
+            obs = minbar.Observation(obs_entry=o[oid])
+            lc = obs.get_lc()
+            sel_burst = np.where((obs.mjd.mjd > t0 - (pre * u.s).to('d').value) &
+                                 (obs.mjd.mjd < t0 + (post * u.s).to('d').value))[0]
+
+            mjd, rate, error = obs.mjd.mjd[sel_burst], obs.rate[sel_burst], obs.error[sel_burst]
+
+        else:
+            # Try to get the data remotely
+            logger.error('Remote data retrieval not yet implemented')
+
+        return mjd, rate, error
 
     def unique(self):
         """
