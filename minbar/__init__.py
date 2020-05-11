@@ -513,8 +513,10 @@ class Bursts(Minbar):
         self.selection = np.logical_and(self.selection, selection)
 
         self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
-        logger.info('Selected {} unique {}s by excluding {}'.format(len(np.where(self.selection)[0]),
-                self.entryname, len(self.ind)-len(np.where(self.selection)[0])))
+        n_excluded = len(self.ind) - len(np.where(self.selection)[0])
+        if n_excluded > 0:
+            logger.info('Selected {} unique {}s by excluding {}'.format(len(np.where(self.selection)[0]),
+                    self.entryname, n_excluded))
         self.ind = np.where(self.selection)[0][self.time_order]
 
 

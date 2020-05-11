@@ -609,6 +609,7 @@ def generate_bins(x_b, x_o, nperbin=10, log=True, x_lim=None, x_add=None):
     # Calculate the number of bins
 
     n = len(x_b)
+    si = np.argsort(x_b)
     nbins = int(n / nperbin) + 1
 
     # If there's only 2 bins and the second one has less than half of the first
@@ -623,7 +624,7 @@ def generate_bins(x_b, x_o, nperbin=10, log=True, x_lim=None, x_add=None):
             _nperbin += 1
 
     if x_add is not None:
-        if isinstance(x_add, float):
+        if not isinstance(x_add, list):
             x_add = [x_add]
         n_add = len(x_add)
 
@@ -643,11 +644,8 @@ def generate_bins(x_b, x_o, nperbin=10, log=True, x_lim=None, x_add=None):
             inext_old = len(np.where(x_b < x_lim[0])[0])
             print('** WARNING ** {} events below hard bin limit'.format(inext_old))
             bins = np.array(x_lim[0])
-        if len(x_lim) > 1:
-            print('** ERROR ** upper bin limit not yet implemented')
 
     # print (min(x_b),min(x_o), bins)
-    si = np.argsort(x_b)
 
     # Find the largest gap between observations (bursts?). This block returns
     # _img and img;
@@ -688,6 +686,12 @@ def generate_bins(x_b, x_o, nperbin=10, log=True, x_lim=None, x_add=None):
 
             bins = np.append(bins, 1.01 * max(np.concatenate((x_b, x_o))))
             # print('last bin', bins[-2], '-', bins[-1], max(x_b), max(x_o))
+            if (x_lim is not None):
+                if len(x_lim) > 1:
+                    if (bins[-1] > x_lim[1]):
+                        # Add an extra bin here corresponding to the limit
+                        bins = np.insert(bins, -1, x_lim[1])
+
         else:
 
             # Here we can optionally check for gaps
@@ -729,18 +733,28 @@ def generate_bins(x_b, x_o, nperbin=10, log=True, x_lim=None, x_add=None):
             bins = np.append(bins, (1 - _log) * 0.5 * (x_b[si[inext - 1]] + x_b[si[inext]]) +
                              _log * np.sqrt(x_b[si[inext - 1]] * x_b[si[inext]]))
 
-            # If you've set a hard lower limit, you need to make sure the 2nd (and subsequent)
-            # bins are at larger values
+            # Add any custom bins here
 
-            if x_lim is not None:
-                assert bins[-1] > x_lim[0]
-
+            ninrange = 0
             if x_add is not None:
                 inrange, ninrange, dummy = idlwhere((np.array(x_add) > bins[-2]) & (np.array(x_add) < bins[-1]))
                 if ninrange > 0:
                     # Add a custom bin here
                     bins[-1] = x_add[inrange[0]]
-                    inext = inext_old + len(np.where((x_b >= bins[-2]) & (x_b < bins[-1])))
+                    inext = inext_old + len(np.where((x_b >= bins[-2]) & (x_b < bins[-1]))[0])
+
+            # If you've set a hard lower limit, you need to make sure the 2nd (and subsequent)
+            # bins are at larger values
+            # Don't get this mixed up with the additional bins though
+
+            if (x_add is None or ninrange <= 0) and x_lim is not None:
+                assert bins[-1] > x_lim[0]
+                if len(x_lim) > 1:
+                    # Also impose the upper limit
+                    if bins[-1] > x_lim[1]:
+                        bins[-1] = min([bins[-1],x_lim[1]])
+                        inext = inext_old + len(np.where((x_b >= bins[-2]) & (x_b < bins[-1]))[0])
+                        # print ('imposing bin upper limit', inext, inext_old)
 
         inext_old = inext
 
@@ -798,7 +812,8 @@ def calc_alpha(src, bc=None, nperbin=16, limit=None, custom=None,
     fn = sys._getframe().f_code.co_name
 
     eta = 1e-6
-    q = 0.5 * (1. - conf)  # confidence interval for errors
+    q = 0.5 * (1. - conf)   # confidence interval for errors
+    conf_lim = 0.95            # confidence value for limits
     tdel_thresh = 1800. / 3600.  # [hr] threshold for short-recurrence time bursts
 
     if s_z:
@@ -1125,6 +1140,8 @@ def calc_alpha(src, bc=None, nperbin=16, limit=None, custom=None,
 
             bin_id[i] = lburst[gb]
 
+            # Calculate the errors; see e.g. https://gist.github.com/JohannesBuchner/ea0269f567e2d1f062b0304b575884fc
+
             nb_lo[i] = scipy.special.gammaincinv(nb[i] + 1, q)
             nb_hi[i] = scipy.special.gammaincinv(nb[i] + 1, 1. - q)
 
@@ -1142,6 +1159,12 @@ def calc_alpha(src, bc=None, nperbin=16, limit=None, custom=None,
                         fn, len(bad), len(gb), mfluen))
                 # print(nb[i], fluen[gb])
 
+        else:
+
+            # Always have an upper limit, even when nb[i] is zero
+
+            nb_hi[i] = scipy.special.gammaincinv(nb[i] + 1, conf_lim)
+
         # Find all the observations that fall into this bin
 
         g, ng, dummy = idlwhere(ind_o == i + 1)
@@ -1157,33 +1180,34 @@ def calc_alpha(src, bc=None, nperbin=16, limit=None, custom=None,
             # Define instead asymmetric errors
             # print (k,scipy.special.gammaincinv(k+1,q),scipy.special.gammaincinv(k+1,1.-q))
 
-            rateall_lo[i] = rateall[i] - scipy.special.gammaincinv(nb[i] + 1, q) / (yall[i] / 3.6)
-            rateall_hi[i] = scipy.special.gammaincinv(nb[i] + 1, 1. - q) / (yall[i] / 3.6) - rateall[i]
+            rateall_lo[i] = rateall[i] - nb_lo[i] / (yall[i] / 3.6)
+            rateall_hi[i] = nb_hi[i] / (yall[i] / 3.6) - rateall[i]
 
             # print (nb[i], ng, rateall[i], rateall_lo[i], rateall_hi[i])
 
             # Calculate the alpha value and error
 
-            flux_int = sum(dur[g] * flux[g]) * _bc
-            fluen_sum = sum(fluen[gb]) * 1e3
-            alpha[i] = aniso_fac * flux_int / fluen_sum
-            # alpha_err[i] = alpha[i]/sqrt(float(nb[i]))
-            alpha_err[i] = aniso_fac * np.sqrt(sum((dur[g] * _bc / fluen_sum) ** 2 * flux_err[g] ** 2)
-                                   + sum((flux_int / fluen_sum ** 2) ** 2 * (fluen_err[gb[nz]]*1e3) ** 2))
+            if nb[i] > 0:
+                flux_int = sum(dur[g] * flux[g]) * _bc
+                fluen_sum = sum(fluen[gb]) * 1e3
+                alpha[i] = aniso_fac * flux_int / fluen_sum
+                # alpha_err[i] = alpha[i]/sqrt(float(nb[i]))
+                alpha_err[i] = aniso_fac * np.sqrt(sum((dur[g] * _bc / fluen_sum) ** 2 * flux_err[g] ** 2)
+                                       + sum((flux_int / fluen_sum ** 2) ** 2 * (fluen_err[gb[nz]]*1e3) ** 2))
 
-            # Factor in the bolometric correction uncertainty if present
+                # Factor in the bolometric correction uncertainty if present
 
-            if _bce > 0.:
-                alpha_err[i] = np.sqrt( alpha_err[i]**2 + alpha[i]**2*(_bce/_bc)**2 )
+                if _bce > 0.:
+                    alpha_err[i] = np.sqrt( alpha_err[i]**2 + alpha[i]**2*(_bce/_bc)**2 )
 
-            # Factor in the Poisson uncertainties here
-            alpha_err_lo[i] = np.sqrt( alpha_err[i]**2 + alpha[i]**2*((nb[i]-nb_lo[i])/nb[i])**2 )
-            alpha_err_hi[i] = np.sqrt( alpha_err[i]**2 + alpha[i]**2*((nb_hi[i]-nb[i])/nb[i])**2 )
+                # Factor in the Poisson uncertainties here
+                alpha_err_lo[i] = np.sqrt( alpha_err[i]**2 + alpha[i]**2*((nb[i]-nb_lo[i])/nb[i])**2 )
+                alpha_err_hi[i] = np.sqrt( alpha_err[i]**2 + alpha[i]**2*((nb_hi[i]-nb[i])/nb[i])**2 )
 
     # return everything
 
     result =  {'src': src, 'minbar_version': minbar.VERSION, 'date': minbar.DATE,
-               'conf': conf, 'bc': (_bc, _bce), 'aniso': aniso_fac, 'nperbin': nperbin,
+               'conf': conf, 'conf_lim': conf_lim, 'bc': (_bc, _bce), 'aniso': aniso_fac, 'nperbin': nperbin,
                'bins': bins, 'n': nb, 'rate': rateall, 'rate_err': (rateall_lo, rateall_hi),
                'alpha': alpha, 'alpha_err': (alpha_err_lo, alpha_err_hi),
                'id': lburst, 'id_obs': lobs, 'badbursts': badbursts, 'badobs': badobs,
@@ -1224,24 +1248,9 @@ def binplot(bins, rate, rate_err, panel=None, pbins=None,
 
     #    y=r['rate'][0] # burst rate array
     y = rate
-    y = y[np.nonzero(y)]
+    y = y[np.nonzero(y)] # non-zero rates for plotting
     y = np.append(y, y[-1])  # augment by one for step plot
-    #    print (y)
-
     nbins = len(y)
-
-    # Generate the bin midpoints for plotting
-
-    if pbins is None:
-        if log:
-            pbins = np.sqrt(bins[1:nbins] * bins[0:nbins - 1])
-        else:
-            pbins = 0.5 * (bins[1:nbins] + bins[0:nbins - 1])
-
-    #    bins=r['bins'][0][0:nbins]*bc # bins for step plot
-
-    #    pbins=r['pbins'][0][0:nbins-1]*bc # where to plot symbols (with errors)
-    #    rate_err=[r['rate_err_lo'][0][0:nbins-1]*bc,r['rate_err_hi'][0][0:nbins-1]*bc]
 
     # need to modify the length of the rate_err tuples here to omit the last
     # bin
@@ -1254,11 +1263,29 @@ def binplot(bins, rate, rate_err, panel=None, pbins=None,
         # First row contains the lower errors, the second row contains the upper errors.
         _rate_err = (rate_lo[0:nbins - 1], rate_hi[0:nbins - 1])
         # print (np.shape(_rate_err))
-        lim = np.logical_and(rate <= 0.0, rate_hi > 0.0)
+        # We take one element off the arrays below to match pbins
+        lim = np.logical_and(rate <= 0.0, rate_hi > 0.0)[:-1]
+        rate_hi = rate_hi[:-1]
         # print(lim)
     else:
         _rate_err = rate_err[0:nbins - 1]
         lim = []
+
+    #    print (y)
+    nbins = len(y)
+
+    # Generate the bin midpoints for plotting
+
+    if pbins is None:
+        if log:
+            pbins = np.sqrt(bins[1:] * bins[:-1])
+        else:
+            pbins = 0.5 * (bins[1:] + bins[:-1])
+
+    #    bins=r['bins'][0][0:nbins]*bc # bins for step plot
+
+    #    pbins=r['pbins'][0][0:nbins-1]*bc # where to plot symbols (with errors)
+    #    rate_err=[r['rate_err_lo'][0][0:nbins-1]*bc,r['rate_err_hi'][0][0:nbins-1]*bc]
 
     #    print (nbins)
     #    y=np.append(r['rate'][0],r['rate'][0][nbins-1])
