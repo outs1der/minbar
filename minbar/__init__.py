@@ -45,9 +45,11 @@ DATE = datetime.now()
 
 # Local paths for MINBAR data; you need to update this when installing
 # on a new system
+# This is NOT the directory where the table data files are found
+# LOCAL_DATA flag is now determined dynamically as part of minbar.__init__
 
 MINBAR_ROOT = '/Users/Shared/burst/minbar'
-LOCAL_DATA = True
+# LOCAL_DATA = True
 
 # Bytearr entries are for consistency between the IDL and ASCII
 # versions of the data
@@ -149,6 +151,26 @@ def create_logger():
 
 logger = create_logger()
 
+def mjd_to_ss(time):
+    """
+    Converts MJD UTC (as used for the MINBAR burst start times) to RXTE
+    Spacecraft seconds, as used for the time-resolved spectroscopic files derived
+    from MIT "packet" data
+    NOT for use with the FITS data, which use a slightly different convention
+    Spacecraft Clock Seconds (SCCS), or Mission Elapsed Time (MET), will represent
+    true elapsed seconds since January 1, 1994, at 0h0m0s UTC, which corresponds to
+    MJD = 49353.0 (UTC)
+    see https://heasarc.gsfc.nasa.gov/docs/xte/abc/time_tutorial.html
+    Conversion below is chosen for consistency with the IDL tconv routine, as well
+    as the xtime page, with the "Apply Clock Offset Correction(s) for RXTE and Swift"
+    option; see https://heasarc.gsfc.nasa.gov/cgi-bin/Tools/xTime/xTime.pl
+    :param time:
+    :return:
+    """
+
+    _time = Time(time, scale='utc', format='mjd')
+
+    return (_time.tt.mjd - 49353.000696574074) * 86400. - 3.378431
 
 def verify_path(source, path, source_path, verbose=True):
     """
@@ -240,7 +262,18 @@ class Minbar(IDLDatabase):
         self.records.add_index('entry')
 
         # Also want to determine if we have local data
+        # By default, MINBAR includes data from RXTE/PCA, BeppoSAX/WFC, and INTEGRAL/JEM-X
+        # so define those instruments here. We pass the names to avoid having to create
+        # a Sources object each time (noting that this limits the source name list to those
+        # sources with bursts in MINBAR)
 
+        self.instruments = {'XP': Instrument('PCA', source_name=self.names),
+                            'SW': Instrument('WFC', source_name=self.names),
+                            'IJ': Instrument('JEM-X', source_name=self.names)}
+        # local_data is set to true if *any* of the source paths are found
+        self.local_data = False
+        for key in self.instruments.keys():
+            self.local_data = self.local_data | np.any(self.instruments[key].has_dir)
 
     def fix_labels(self):
         """
@@ -253,12 +286,12 @@ class Minbar(IDLDatabase):
 
     def get_names(self):
         """
-        Get a list of all source names in the archive. Ordered by right ascension.
+        Returns a list of all source names in the archive. Ordered by right ascension.
         RA is not a part of the MRT tables, so can only do this with the IDL version.
         Should really replace with a read of the FITS table, which is the definitive
         version
         """
-        names = np.unique(self.records.field('name'))
+        names = np.unique(self.records.field('name').data)
 
         if self.IDL:
             ra = np.array([self.records.field('ra')[self.records.field('name') == name][0] for name in names])
@@ -501,6 +534,132 @@ class Bursts(Minbar):
             self.type = None
         self.clear()
 
+    def get_burst_data(self, id):
+        """
+        Retrieve time-resolved spectroscopy for this burst
+        Replacement for the get_burst_data IDL function
+        :param id:
+        :return:
+        Example usage:
+        data = b.get_burst_data(1918)
+        """
+
+        wfcdataroot = 'wfcspec_vs2'
+
+        if self.local_data:
+            # Try to get the file locally
+            instr = self[id]['instr']
+            if instr[0:2] == 'IJ':
+                logger.error('Time-resolved spectroscopy not available for JEM-X bursts')
+                return None
+
+            # Get the source path
+            # Can probably package this into the Minbar class for wider use
+
+            _match = self.instruments[instr[0:2]].source_name == self[id]['name']
+            if not np.any(_match):
+                logger.error('No source directory for this burst')
+                return None
+
+            if instr[0:2] == 'SW':
+                # Get WFC data
+                # File naming convention is a bit messed up in the directory Jean provided
+                # - EXO 0748-676 files are EXO0748-678_*
+                # - +'s in source names are replaced by p
+                _path = '/'.join([MINBAR_ROOT, MINBAR_INSTR_PATH[instr[0:2]], wfcdataroot])
+
+                file_pref = self.instruments[instr[0:2]].source_path[_match][0]
+                if file_pref == '4U2129+12':
+                    file_pref='M15'
+                elif file_pref == 'EXO0748-676':
+                    file_pref='EXO0748-678'
+                elif file_pref == '4U1246-588':
+                    file_pref='A1246-588'
+                # this is so fucking painful
+                file_pref = str(np.char.replace(file_pref, '+', 'p'))
+
+                _file = '/'.join([_path, file_pref ]) \
+                        + '_{}w{}_{:02d}.spec'.format( self[id]['obsid'].zfill(5), instr[2:], self[id]['bnum'])
+
+                if not os.path.isfile(_file):
+                    logger.error('time-resolved spectroscopy file not found!')
+                else:
+                    # Now read in the data...format is
+                    # (1) MJD interval
+                    # (2) kT of black body model[keV]
+                    # (3) 1 sigma error in kT[keV]
+                    # (4) black body radius R[km for d=10 kpc]
+                    # (5) 1 sigma error in R[km for d=10 kpc]
+                    # (6) 3 - 25 keV flux[erg / cm ^ 2 / s]
+                    # (7) 1 sigma error on 3 - 25 keV flux[erg / cm ^ 2 / s]
+                    # (8) Unabsorbed bolometric flux of black body[erg / cm ^ 2 / s]
+                    # (9) Error in unabsorbed bolometric flux, based on delta(chi2) = 2.7[erg / cm ^ 2 / s]
+                    # (10) chi ^ 2 - red
+
+                    _data = pd.read_csv(_file,
+                        names=['trange','kT','kT_err','rad','rad_err','flux_3_25','flux_3_25_err',
+                               'flux','fluxerr','chisq'], sep='\s+')
+                    nspec=len(_data)
+                    time=np.zeros(nspec)
+                    dt=np.zeros(nspec)
+                    for j in range(nspec):
+                        tmp=_data['trange'][j].split('-')
+                        time[j]=float(tmp[0])
+                        dt[j]=(float(tmp[1])-time[j])*86400.
+                    _data['dt'] = dt
+                    # This calculation assumes UTC for the time ranges
+                    _data['time'] = (time-self[id]['time'])*86400.
+
+                    # These flux errors are FAR too big
+                    _data['flux'] *= 1e9
+                    _data['fluxerr'] *= 1e9
+                    _data['flux_min'] = _data['flux']-_data['fluxerr']
+                    _data['flux_max'] = _data['flux']+_data['fluxerr']
+                    logger.warning('BeppoSAX/WFC flux is 2-10 keV only!')
+                    lz=np.where(_data['flux_min'] < 0.)[0]
+                    if len(lz) > 0:
+                        _data['flux_min'][lz]=0.1
+                    _data['kT_min'] = _data['kT']-_data['kT_err']
+                    _data['kT_max'] = _data['kT']+_data['kT_err']
+                    _data['rad_min'] = _data['rad']-_data['rad_err']
+                    _data['rad_max'] = _data['rad']+_data['rad_err']
+
+                    # Need to be aware of different conventions here for the files; SAX files
+                    # have radius in units of km/10kpc, while RXTE is (km/10kpc)^2
+
+                    _data['rad'] = _data['rad']**2
+                    _data['rad_min'] = _data['rad_min']**2
+                    _data['rad_max'] = _data['rad_max']**2
+
+            elif instr[0:2] == 'XP':
+                # Get PCA data
+                # this is a bit of a challenge with the historical arrangement of the burst data under the
+                # alternate file heirarchy, but we can overcome this with some judicious softlinks
+                _path = '/'.join([MINBAR_ROOT, MINBAR_INSTR_PATH[instr[0:2]], 'data',
+                                  self.instruments[instr[0:2]].source_path[_match][0],
+                                  self[id]['obsid'], 'burst{}'.format(self[id]['bnum']) ])
+                _file = '/'.join([_path, 'analysis/bbfit_kabs.log'])
+
+                _data = pd.read_csv(_file, comment='#',
+                    names=['time', 'r', 're', 'dt', 'nH', 'nH_min', 'nH_max', 'kT', 'kT_min', 'kT_max',
+                        'rad', 'rad_min', 'rad_max', 'chisq', 'rawflux', 'flux', 'flux_min', 'flux_max'], sep='\s+')
+
+                # _data = _path # for testing
+                _data['fluxerr'] = 0.5*(_data['flux_max']-_data['flux_min'])
+
+                # Need to adjust time from SS to seconds post star time
+
+                _data['time'] -= mjd_to_ss(self[id]['time'])
+
+            else:
+                logger.error('time-resolved spectroscopy not yet implemented for this instrument')
+
+        else:
+            # Try to get the data remotely
+            logger.error('Remote data retrieval not yet implemented')
+
+        return _data
+
     def get_lc(self, id, pre=16., post=None):
         """
         Preliminary routine to return the lightcurve corresponding to a burst
@@ -514,7 +673,7 @@ class Bursts(Minbar):
         :return:
         """
 
-        if LOCAL_DATA:
+        if self.local_data:
             # Try to get the file locally
             oid = self[id]['entry_obs']
             t0 = self[id]['time']
@@ -1145,6 +1304,8 @@ class Instrument:
     Here's a generic instrument class which can be adapted and/or duplicated for different
     instruments. This class is kept pretty lean to avoid having to replicate lots of code
     Defines the properties of an instrument with data that we're going to analyse and add to MINBAR
+    :param name: name of the instrument
+    :param source_name: list of source names, to avoid having to load a Sources object
     Example
     import minbar
     jemx = minbar.Instrument('JEM-X', 'jemx', 'IJ')
@@ -1152,6 +1313,7 @@ class Instrument:
 
     def __init__(self, name, path=None, label=None,
                  lightcurve=['lc1_3-25keV_1.0s.fits','lc2_3-25keV_1.0s.fits'],
+                 source_name=None,
                  spectrum=None,
                  verbose=False):
 
@@ -1177,26 +1339,33 @@ class Instrument:
             logger.error('need a valid path for the data files')
             return None
 
+        # Set the list of names. If not provided we'll create a Sources object and read it
+        # (as a chararray) from there; otherwise you can pass it as a parameter
+
+        if source_name is None:
+            self.source = Sources()
+            self.source_name = self.source['name']
+        else:
+            self.source_name = source_name
+
         # Define the paths corresponding to each source here
         # Default is just the source name with spaces removed; this won't work for RXTE
+        # (without some judicious softlinks)
 
-        self.source = Sources()
-        self.source_name = self.source['name']
+        self.source_path = np.char.replace(source_name, " ", "")
         if self.label == 'XP':
-            # for RXTE/PCA, most sources just omit the prefix
-            self.source_path = np.array([x.split()[1] for x in self.source_name])
+            # for RXTE/PCA, most sources just omit the prefix (but not the GX sources)
+            # self.source_path = np.array([x.split()[1] for x in self.source_name])
             # The standard product lightcurve also includes the obsid, so define the lightcurve
             # parameter as a function here
             lightcurve = self.pca_lightcurve_filename
             self.effarea = PCA_EFFAREA
             self.effarea_bursts = PCA_EFFAREA
-        else:
-            # more commonly we just remove the spaces
-            self.source_path = self.source_name.replace(" ", "")
 
         if self.label == 'IJ':
             # for JEM-X, the convention is to also replace '+' with 'p'
-            self.source_path = self.source_path.replace("+","p")
+            # self.source_path = self.source_path.replace("+","p")
+            self.source_path = np.char.replace(self.source_path, "+","p")
             self.effarea = JEMX_EFFAREA
             self.effarea_bursts = JEMX_EFFAREA_BURSTS
 
@@ -1210,7 +1379,7 @@ class Instrument:
         # with the directory names
 
         self.has_dir, self.nonmatched, self.nmissing = verify_path(
-            self.source, self.path, self.source_path, verbose=verbose)
+            self.source_name, self.path, self.source_path, verbose=verbose)
 
         # Define the lightcurve and spectral files
 
