@@ -920,8 +920,16 @@ class Observation:
         """
         Return a nice string.
         """
-        return "MINBAR observation of {}\nInstrument: {}\nObsID: {}\nTime range: {}-{}".format(
-            self.name, self.instr.name, self.obsid, self.tstart, self.tstop)
+
+        output = "MINBAR observation of {}\nInstrument: {}\nObsID: {}".format(
+            self.name, self.instr.name, self.obsid)
+        if hasattr(self,'tstart') & hasattr(self,'tstop'):
+            output += "\nTime range: {}-{}".format(self.tstart, self.tstop)
+        _path = self.get_path()
+        if _path is not None:
+            output += "\nData path: {}".format(_path)
+
+        return output
 
 
     def plot(self):
@@ -948,9 +956,18 @@ class Observation:
         """
 
         instr = self.instr.label
-        return '/'.join([MINBAR_ROOT, self.instr.path, 'data',
-                         self.instr.source_path[self.instr.source_name == self.name][0],
+        if self.instr.local_data:
+            _match = np.where(self.instr.source_name == self.name)[0]
+            # print (_match)
+            assert len(_match) == 1
+            # if len(_match) > 1:
+                # logger.warning("multiple source name matches for path")
+            if self.instr.has_dir[_match[0]]:
+                return '/'.join([MINBAR_ROOT, self.instr.path, 'data',
+                         self.instr.source_path[_match[0]],
                          self.obsid])
+
+        return None
 
 
     def get_lc(self):
@@ -1352,7 +1369,8 @@ class Instrument:
         # Default is just the source name with spaces removed; this won't work for RXTE
         # (without some judicious softlinks)
 
-        self.source_path = np.char.replace(source_name, " ", "")
+        # print (type(self.source_name), type(self.source_name[0]), self.source_name[0])
+        self.source_path = np.char.replace(self.source_name, " ", "")
         if self.label == 'XP':
             # for RXTE/PCA, most sources just omit the prefix (but not the GX sources)
             # self.source_path = np.array([x.split()[1] for x in self.source_name])
@@ -1380,6 +1398,10 @@ class Instrument:
 
         self.has_dir, self.nonmatched, self.nmissing = verify_path(
             self.source_name, self.path, self.source_path, verbose=verbose)
+
+        # as for MINBAR
+
+        self.local_data = np.any(self.has_dir)
 
         # Define the lightcurve and spectral files
 
