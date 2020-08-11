@@ -1030,9 +1030,9 @@ class Sources:
     s.clear() # Clear selection
     """
     
-    def __init__(self, filename=None):
+    def __init__(self, filename=None, X=0.0, Gaia=True):
         """
-        Load source list from filename.
+        Load source list from FITS file.
         """
         if filename==None:
             filename = self.get_default_path()
@@ -1042,10 +1042,12 @@ class Sources:
         self.field_labels = self._get_field_labels()
         self._fits_names = list(self.field_names) # Keep track of which fields are in fits file
         self.clear()
-        self.dist, self.diste = self.get_distances()
+        self.dist, self.diste = self.get_distances(X=X, Gaia=Gaia)
         self.field_names += ['dist', 'diste']
         self.field_labels['dist'] = 'Distance (kpc)'
         self.field_labels['diste'] = 'Error on distance (kpc)'
+        self.X = X
+        self.Gaia = Gaia
 
         # Extract the version information
 
@@ -1203,102 +1205,123 @@ class Sources:
         return F_Edd, F_Edd_Err
 
 
-    def get_distances(self):
+    def get_distances(self, X=0.0, Gaia=True):
         """
         Create an array of distances for all sources in self.name
         
-        Distances taken from Kuulkers et al. (2003) for Globular Cluster
-        sources, otherwise from the Liu et al. (200?) lmxb catalog. In
-        individual cases, the reference is indicated in a comment. If
-        uncertainty is unknown, it defaults to 0.
-
-        TODO: check for missing entries; add distance reference, similar to NH.
+        Distances taken from Table 8 of the MINBAR paper, which includes
+        distances derived from the Eddington flux measured for MINBAR
+        bursts, as well as distances measured from Gaia and other sources
         """
-        distances = {'4U 0513-40': (12.1, 0.3),
-                     '4U 0614+09': (3.0, 0),
-                     'EXO 0748-676': (8.3, 0),
-                     '4U 0836-429': (11, 0),
-                     '2S 0918-549': (4.0, 0),
-                     '4U 1246-588': (13.0, 0),
-                     '4U 1254-69': (0, 0),
-                     '4U 1323-62': (11.0, 0),
-                     'SAX J1324.5-6313': (6.2, 0),
-                     '4U 1608-522': (5.16, 0.72),
-                     '4U 1636-536': (5.95, 0.12), # Galloway et al. 2008 solar PRE
-                     'MXB 1658-298': (12, 0),
-                     '4U 1702-429': (5.5, 0),
-                     '4U 1705-32': (13.0, 2.0),
-                     '4U 1705-44': (7.5, 1.1),
-                     'IGR J17062-6143': (7.3, 0.5), # Keek et al. 2017
-                     '4U 1708-40': (0.0, 0),
-                     'XTE J1709-267': (8.8, 0),
-                     'XTE J1710-281': (14.0, 2.0),
-                     '2S 1711-339': (7.5, 0),
-                     'SAX J1712.6-3739': (7.0, 0),
-                     '1H 1715-321': (0.0, 0),
-                     'RX J1718.4-4029': (6.5, 0),
-                     'XTE J1723-376': (13.0, 0),
-                     '4U 1722-30': (9.5, 2.5),
-                     '4U 1728-34': (5.2, 0),
-                     'MXB 1730-335': (8.8, 3.3),
-                     'KS 1731-260': (7.0, 0),
-                     'SLX 1732-304': (4.3, 2.3),
-                     'SLX 1735-269': (7.3, 0),
-                     '4U 1735-444': (8.0, 1.0),
-                     'SLX 1737-282': (6.5, 1.5),
-                     'XTE J1739-285': (10.6, 0),
-                     'KS 1741-293': (0.0, 0),
-                     'GRS 1741.9-2853': (7.5, 2.5),
-                     '1A 1742-294': (10.0, 0),
-                     '1A 1744-361': (0.0, 0),
-                     'SLX 1744-300': (6.7, 0),
-                     '1A 1744-361': (11.0, 0),
-                     'EXO 1745-248': (5.5, 0.9), # 2007A&A...470.1043O
-                     '4U 1746-37': (11.0, 0.9),
-                     'IGR J17473-2721': (0, 0),
-                     'SAX J1747.0-2853': (8, 0), # 2006ApJS..165..173M
-                     'GRS 1747-312': (9.5, 3.3),
-                     'SAX J1748.9-2021': (8.4, 1.5),
-                     'SAX J1750.8-2900': (5.0, 0),
-                     'SAX J1752.3-3138': (9.0, 0),
-                     'SAX J1753.5-2349': (6.0, 0),
-                     'IGR J17597-2201': (5.0, 0),
-                     '2S 1803-245': (0, 0),
-                     'SAX J1806.5-2215': (8.0, 0),
-                     'SAX J1808.4-3658': (2.5, 0),
-                     'SAX J1810.8-2609': (4.9, 0),
-                     '4U 1812-12': (4.1, 0),
-                     'XTE J1814-338': (8.0, 1.6),
-                     'SAX J1818.7+1424': (9.4, 0),
-                     '4U 1820-303': (7.6, 0.4),
-                     'AX J1824.5-2451': (5.6, 0),
-                     'GS 1826-24': (6.0, 0),
-                     'SAX J1828.5-1037': (6.2, 0),
-                     'XB 1832-330': (9.6, 0.4),
-                     'Ser X-1': (8.4, 0),
-                     '4U 1850-086': (8.2, 0.6),
-                     'HETE J1900.1-2455': (4.7, 0.6),
-                     'XB 1905+000': (0.0, 0),
-                     'XB 1916-053': (8.9, 0),
-                     'XTE J2123-058': (8.5, 2.5),
-                     '4U 2129+12': (10.3, 0.4),
-                     'SAX J2224.9+5421': (7.1, 0),
-                     'Aql X-1': (5.0, 0.0),
-                     'Cir X-1': (0.0, 0),
-                     'Cyg X-2': (11.6, 0),
-                     'GX 17+2': (9.8, 0),
-                     'GX 3+1': (6.5, 0),
-                     'GX 13+1': (7.0, 0), # Christian & Swank 1997
-                     }
 
-        logger.warning('distances are outdated, use with caution')
+        idist = 3 # index for distances to adopt
+        if (X != 0.7) & (X != 0.0):
+            logger.error('distances not defined for other than X=(0.0,0.7)')
+            return None
+        elif X == 0.7:
+            idist = 2
+
+        # The table below defines a "distance tuple" for each source; the components are:
+        # 1. the average peak luminosity and 1-sigma error (in 1E-9 erg/cm^2/s);
+        # 2. the "measured" distance in kpc, with two-sided error (upper and lower), and a string
+        #    indicating the source;
+        # 3. the distance in kpc inferred from the peak Eddington flux for X=0.7, and 1-sigma error;
+        # 4. the distance in kpc inferred from the peak Eddington flux for X=0.0, and 1-sigma error
+        # The flags to this routine are used to populate the (simpler) array distances
+
+        table8 = {  '4U 0513-40': ((14.4, 6.7), (10.32, 0.2, -0.24, '1'), (8.5, 1.5), (11.1, 1.9)),
+                    '4U 0614+09': ((266.0, 6.0), (3.27, 2.42, -1.3, 'G'), (1.99, 0.02), (2.59, 0.03)),
+                    'EXO 0748-676': ((46.5, 4.3), (0.0, 0.0, -0.0, ''), (4.7, 0.2), (6.2, 0.3)),
+                    '4U 0836-429': ((0.0, 0.0), (3.18, 2.25, -1.4, 'G'), (0.0, 6.9), (0.0, 9.0)),
+                    '2S 0918-549': ((119.1, 14.4), (5.77, 2.77, -1.6, 'G'), (3.0, 0.2), (3.9, 0.2)),
+                    '4U 1246-588': ((120.3, 11.9), (2.03, 2.37, -1.17, 'G'), (3.0, 0.1), (3.8, 0.2)),
+                    '4U 1254-69': ((0.0, 0.0), (3.18, 3.16, -1.33, 'G'), (0.0, 6.0), (0.0, 7.9)),
+                    'SAX J1324.5-6313': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.7), (0.0, 6.1)),
+                    '4U 1323-62': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 5.2), (0.0, 6.8)),
+                    'Cir X-1': ((0.0, 0.0), (6.17, 2.86, -1.96, 'G'), (0.0, 13.6), (0.0, 17.7)),
+                    '4U 1608-522': ((169.0, 41.2), (5.8, 1.8, -2.0, '2'), (2.5, 0.3), (3.2, 0.3)),
+                    '4U 1636-536': ((72.5, 18.8), (4.42, 3.08, -1.63, 'G'), (3.8, 0.4), (5.0, 0.5)),
+                    'XTE J1701-462': ((43.4, 1.4), (0.0, 0.0, -0.0, ''), (4.9, 0.1), (6.4, 0.1)),
+                    'MXB 1658-298': ((17.0, 15.9), (0.0, 0.0, -0.0, ''), (7.9, 2.2), (10.2, 2.9)),
+                    '4U 1702-429': ((88.7, 45.0), (0.0, 0.0, -0.0, ''), (3.4, 0.6), (4.5, 0.8)),
+                    '4U 1705-32': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.4), (0.0, 5.7)),
+                    '4U 1705-44': ((41.3, 17.5), (0.0, 0.0, -0.0, ''), (5.0, 0.8), (6.6, 1.1)),
+                    'XTE J1709-267': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 2.7), (0.0, 3.6)),
+                    'XTE J1710-281': ((7.1, 1.8), (0.0, 0.0, -0.0, ''), (12.2, 1.3), (15.9, 1.7)),
+                    'SAX J1712.6-3739': ((76.0, 46.9), (0.0, 0.0, -0.0, ''), (3.7, 0.8), (4.8, 1.0)),
+                    '2S 1711-339': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.9), (0.0, 6.4)),
+                    'RX J1718.4-4029': ((47.2, 6.2), (0.0, 0.0, -0.0, ''), (4.7, 0.3), (6.1, 0.4)),
+                    'IGR J17191-2821': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 5.9), (0.0, 7.7)),
+                    'XTE J1723-376': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 3.7), (0.0, 4.8)),
+                    '4U 1722-30': ((61.8, 16.6), (7.4, 0.5, -0.5, '3,4,5'), (4.1, 0.5), (5.4, 0.6)),
+                    '4U 1728-34': ((94.0, 35.9), (0.0, 0.0, -0.0, ''), (3.3, 0.5), (4.4, 0.7)),
+                    'MXB 1730-335': ((28.0, 7.0), (7.87, 0.56, -0.5, '5'), (6.1, 0.6), (8.0, 0.8)),
+                    'KS 1731-260': ((50.5, 20.4), (0.0, 0.0, -0.0, ''), (4.6, 0.7), (5.9, 0.9)),
+                    'SLX 1735-269': ((52.9, 21.0), (0.0, 0.0, -0.0, ''), (4.5, 0.7), (5.8, 0.9)),
+                    '4U 1735-444': ((34.2, 22.0), (5.65, 3.62, -2.14, 'G'), (5.5, 1.2), (7.2, 1.6)),
+                    'XTE J1739-285': ((0.0, 0.0), (4.06, 4.25, -2.44, 'G'), (0.0, 6.1), (0.0, 7.9)),
+                    'SLX 1737-282': ((68.1, 12.4), (0.0, 0.0, -0.0, ''), (3.9, 0.3), (5.1, 0.4)),
+                    'KS 1741-293': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.2), (0.0, 5.4)),
+                    'GRS 1741.9-2853': ((35.3, 9.8), (0.0, 0.0, -0.0, ''), (5.5, 0.6), (7.1, 0.8)),
+                    '1A 1742-294': ((37.7, 1.3), (0.0, 0.0, -0.0, ''), (5.3, 0.1), (6.9, 0.1)),
+                    'SAX J1747.0-2853': ((52.7, 31.4), (0.0, 0.0, -0.0, ''), (4.5, 0.9), (5.8, 1.2)),
+                    'IGR J17473-2721': ((113.6, 11.7), (0.0, 0.0, -0.0, ''), (3.0, 0.1), (4.0, 0.2)),
+                    'SLX 1744-300': ((13.7, 3.2), (0.0, 0.0, -0.0, ''), (8.7, 0.9), (11.4, 1.1)),
+                    'GX 3+1': ((53.3, 15.2), (0.0, 0.0, -0.0, ''), (4.4, 0.5), (5.8, 0.7)),
+                    'IGR J17480-2446': ((36.1, 9.0), (6.9, 0.5, -0.5, '3,4,6'), (5.4, 0.6), (7.0, 0.7)),
+                    '1A 1744-361': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 7.0), (0.0, 9.1)),
+                    'SAX J1748.9-2021': ((38.0, 6.1), (8.4, 1.5, -1.3, '3,4'), (5.3, 0.4), (6.9, 0.5)),
+                    'EXO 1745-248': ((63.4, 10.9), (6.9, 0.5, -0.5, '3,4,6'), (4.1, 0.3), (5.3, 0.4)),
+                    'IGR J17498-2921': ((51.6, 1.6), (0.0, 0.0, -0.0, ''), (4.5, 0.1), (5.9, 0.1)),
+                    '4U 1746-37': ((5.4, 0.8), (0.0, 0.0, -0.0, ''), (13.9, 1.0), (18.2, 1.3)),
+                    'SAX J1750.8-2900': ((54.3, 6.1), (0.0, 0.0, -0.0, ''), (4.4, 0.2), (5.7, 0.3)),
+                    'GRS 1747-312': ((13.4, 7.3), (6.7, 0.5, -0.5, '3,4,6'), (8.8, 1.7), (11.5, 2.2)),
+                    'IGR J17511-3057': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.1), (0.0, 5.4)),
+                    'SAX J1752.3-3138': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 6.8), (0.0, 8.9)),
+                    'SAX J1753.5-2349': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.4), (0.0, 5.7)),
+                    'IGR J17597-2201': ((15.7, 0.8), (0.0, 0.0, -0.0, ''), (8.2, 0.2), (10.7, 0.3)),
+                    'SAX J1806.5-2215': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.8), (0.0, 6.2)),
+                    '2S 1803-245': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.2), (0.0, 5.4)),
+                    'SAX J1808.4-3658': ((230.2, 26.3), (0.0, 0.0, -0.0, ''), (2.1, 0.1), (2.8, 0.1)),
+                    'XTE J1810-189': ((54.2, 1.8), (0.0, 0.0, -0.0, ''), (4.4, 0.1), (5.7, 0.1)),
+                    'SAX J1810.8-2609': ((111.3, 7.2), (0.0, 0.0, -0.0, ''), (3.1, 0.1), (4.0, 0.1)),
+                    'XMMU J181227.8-181234': ((2.4, 0.3), (14.0, 2.0, -2.0, '7'), (20.9, 1.2), (27.2, 1.5)),
+                    'XTE J1814-338': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 8.6), (0.0, 11.3)),
+                    '4U 1812-12': ((203.1, 40.1), (0.0, 0.0, -0.0, ''), (2.3, 0.2), (3.0, 0.3)),
+                    'GX 17+2': ((14.6, 5.0), (0.0, 0.0, -0.0, ''), (8.5, 1.2), (11.1, 1.5)),
+                    'SAX J1818.7+1424': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 5.9), (0.0, 7.7)),
+                    '4U 1820-303': ((60.5, 22.6), (7.6, 0.4, -0.4, '3,4,8'), (4.2, 0.6), (5.4, 0.8)),
+                    'SAX J1828.5-1037': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 5.8), (0.0, 7.6)),
+                    'GS 1826-24': ((40.0, 3.0), (0.0, 0.0, -0.0, ''), (5.1, 0.2), (6.7, 0.2)),
+                    'XB 1832-330': ((33.8, 4.5), (9.6, 0.4, -0.4, '3,4,9'), (5.6, 0.3), (7.3, 0.4)),
+                    'Ser X-1': ((29.4, 13.8), (4.31, 2.54, -1.61, 'G'), (6.0, 1.0), (7.8, 1.4)),
+                    'HETE J1900.1-2455': ((123.9, 8.6), (0.0, 0.0, -0.0, ''), (2.9, 0.1), (3.8, 0.1)),
+                    'Aql X-1': ((103.3, 19.6), (2.97, 2.64, -1.32, 'G'), (3.2, 0.3), (4.2, 0.3)),
+                    'XB 1916-053': ((30.6, 3.5), (0.0, 0.0, -0.0, ''), (5.8, 0.3), (7.6, 0.4)),
+                    'XTE J2123-058': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 12.3), (0.0, 16.0)),
+                    'M15 X-2': ((40.8, 7.2), (10.38, 0.15, -0.15, '1'), (5.1, 0.4), (6.6, 0.5)),
+                    'Cyg X-2': ((13.1, 2.3), (6.95, 1.16, -0.91, 'G'), (8.9, 0.7), (11.6, 0.9)),
+                    'SAX J2224.9+5421': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 6.0), (0.0, 7.9)) }
+
+        distances = { x: (table8[x][1] if (table8[x][1][0] > 0.0 and Gaia) else table8[x][idist]) for x in table8 }
+
+        # logger.warning('distances are outdated, use with caution')
+        addl = ''
+        if Gaia:
+            addl = ', using Gaia/cluster distances where available'
+
+        logger.info('adopted distances for X={}{}'.format( X, addl))
 
         dist = np.zeros_like(self['ra_obj'])
         diste = np.zeros_like(dist)
         for i, name in enumerate(self['name']):
             if name in distances:
                 dist[i] = distances[name][0]
-                diste[i] = distances[name][1]
+                if len(distances[name]) == 2:
+                    diste[i] = distances[name][1]
+                else:
+                    # two-sided distances are converted to single-sided, for now
+                    diste[i] = 0.5*(distances[name][1]-distances[name][2])
         return dist, diste
 
     def __str__(self):
@@ -1308,11 +1331,35 @@ class Sources:
         list of Eddington fluxes, which is not part of the online dataset
         :return:
         """
+
+        sel_str = ""
+        if self.selection is not None:
+            # Generate a string to give information about the current selection
+            n_sel = len(np.where(self.selection)[0])
+            if n_sel == 1:
+                sel_str = "{} selected ({}".format(n_sel, self['name'])
+            else:
+                sel_str = "{} selected ({}".format(n_sel, ", ".join(self['name'][:min([3,n_sel])]) )
+            if n_sel > 4:
+                sel_str += " ... "
+            elif n_sel == 4:
+                sel_str += ", "
+            if n_sel > 3:
+                sel_str += self['name'][-1]
+            sel_str += ")\n"
+
+        # the "Local files" option here refers only to the F_Edd file, which is not part of the
+        # public distribution
         available = ['unavailable','present']
+
         return """Multi-INstrument Burst ARchive (MINBAR) source table v{}
 {} sources ({} with bursts in MINBAR)
-
-Local files: {}""".format( self.version, len(self), len(np.where(self['nburst'] > 0)[0]),
+{}
+Local files: {}""".format( self.version, len(self),
+                           # this version will include the selection
+                           # len(np.where(self['nburst'] > 0)[0]),
+                           len(np.where(self._f[1].data['nburst'] > 0)[0]),
+                           sel_str,
                            available[int(self.local_files)])
 
 
