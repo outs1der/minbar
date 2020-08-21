@@ -283,7 +283,6 @@ class Minbar(IDLDatabase):
         for k in self.field_labels:
             self.field_labels[k] = re.sub(pat, ' ', self.field_labels[k])
 
-
     def get_names(self):
         """
         Returns a list of all source names in the archive. Ordered by right ascension.
@@ -301,7 +300,6 @@ class Minbar(IDLDatabase):
 
         return names
 
-
     def get_default_path(self, filename):
         """
         Return the default path of the minbar data files with prefix
@@ -309,13 +307,11 @@ class Minbar(IDLDatabase):
         """
         return os.path.join(os.path.dirname(__file__), 'data', filename)
 
-
     def __len__(self):
         """
         Return the number of entries in the current selection.
         """
         return len(self.ind)
-
 
     def get_type(self):
         """
@@ -325,7 +321,6 @@ class Minbar(IDLDatabase):
             return np.ones(len(self.records), np.bool)
         else:
             return self.records.field('type') == self.type
-
 
     def clear(self):
         """
@@ -337,17 +332,62 @@ class Minbar(IDLDatabase):
         self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
         self.ind = np.where(self.selection)[0][self.time_order]
 
-
-    def select(self, name):
+    def select(self, value, attribute='name', exclude=False):
         """
         Set the selection to the source with given name.
+        Previously this would reset the previous selection, but now it respects any prior filter
+        Allows multiple items and uses implied or; also implements exclusion
         """
-        self.name = name
-        self.selection = (self.records.field('name') == name) & self.get_type()  # Match name and burst type
+        if attribute not in self.field_names:
+            logger.error('attribute {} not present in table'.format(attribute))
+            return
+
+        # Handle multiple value items here
+        if np.shape(value) != ():
+            if len(value) == 0:
+                logger.error("can't filter {} on empty list".format(attribute))
+                return
+            _selection = (self.records.field(attribute) == value[0])
+            for _value in value[1:]:
+                _selection = _selection | (self.records.field(attribute) == _value)
+        else:
+            if value == '':
+                logger.error("can't filter {} on empty string".format(attribute))
+            # Match attribute including existing selection, and burst type (for backwards compatibility)
+            _selection = self.records.field(attribute) == value
+
+        # Don't return a null selection
+        # Might instead use attr_like in case that's what was meant
+        if ~np.any(_selection) | (exclude & np.all(_selection)):
+            logger.warning('criteria left no {}s, skipping'.format(self.entryname))
+            return
+
+        if exclude:
+            n_select = len(np.where(self.selection)[0])
+            self.selection = self.selection & ~_selection & self.get_type()
+            action, n_action = 'excluded', n_select-len(np.where(self.selection)[0])
+        else:
+            self.selection = self.selection & _selection & self.get_type()
+            action, n_action = 'selected', len(np.where(self.selection)[0])
+
+        # Retain the time order for the index
+
         self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
         self.ind = np.where(self.selection)[0][self.time_order]
-        logger.info('Selected {} {}s from {}'.format(len(np.where(self.selection)[0]), self.entryname, self.name))
+        if attribute == 'name':
+            self.name = value
+            logger.info('{} {} {}s from {}'.format(action, n_action, self.entryname, self.name))
+        else:
+            logger.info('{} {} {}s with {}={}'.format(action, n_action, self.entryname, attribute, value))
 
+    def obsid(self, obsid):
+        """
+        Select observations with a particular obsid
+        :param obsid:
+        :return:
+        """
+
+        self.select(obsid, attribute='obsid')
 
     def name_like(self, name):
         """
@@ -364,16 +404,37 @@ class Minbar(IDLDatabase):
                 logger.info('{} more matching sources: {}'.format(len(names) - 1, ', '.join(names[1:])))
 
 
+    def attr_like(self, substring, attribute='name'):
+        """
+        Multi-purpose function to find attributes matching a particular string
+        Output can then be used as input to select
+        :param value:
+        :param attribute:
+        :return:
+        """
+        to_search = self[attribute]  # includes the selection
+        if attribute == 'name':
+            to_search = self.names
+        elif attribute == 'instr':
+            # This is not very efficient for PCA observations, as it will return every distinct
+            # instrument code...
+            alias = {'pca': 'XP', 'wfc': 'SW', 'jemx': 'IJ'}
+            if substring in alias:
+                substring = alias[substring]
+
+        selection = []
+        for i in to_search:
+            if i.find(substring) > -1:
+                selection.append(i)
+
+        return list(set(selection))
+
     def get_name_like(self, name):
         """
         Return a list of sources that have 'name' in their archive
         identifier.
         """
-        selection = []
-        for i in self.names:
-            if i.find(name) > -1:
-                selection.append(i)
-        return selection
+        return attr_like(name, 'name')
 
 
     def _pad_name(self, name):
@@ -438,27 +499,52 @@ class Minbar(IDLDatabase):
             return np.char.array(self['instr']).startswith(instrument.encode('ascii'))
 
 
+    def instr(self, instrument, exclude=False):
+        """
+        More general-purpose routine to allow selections (and exclusions) on instr
+        :param instrument:
+        :param exclude:
+        :return:
+        """
+
+        alias = {'pca': 'XP', 'wfc': 'SW', 'jemx': 'IJ'}
+
+        if np.shape(instrument) != ():
+            _instrument = [alias[x] if x in alias else x for x in instrument]
+            instr_all = []
+            for i in _instrument:
+                instr_all += self.attr_like(i, 'instr')
+            self.select(instr_all, 'instr', exclude=exclude)
+            return
+        elif instrument in alias:
+            _instrument = alias[instrument]
+        else:
+            _instrument = instrument
+
+        instr_all = self.attr_like(_instrument, 'instr')
+        if len(instr_all) > 0:
+            self.select(instr_all, 'instr', exclude=exclude)
+
+    def instr_exclude(self, instrument):
+        """
+        Wrapper for instr
+        :param instrument:
+        :return:
+        """
+        self.instr(instrument, exclude=True)
+
     def select_all(self, names):
         """
-        Select multiple sources with given names.
+        Select multiple sources with given names. Now redundant
         """
-        selection = np.zeros_like(self.selection)
-        for name in names:
-            selection = np.logical_or(selection, self.records.field('name') == name)
-        self.selection = selection & self.get_type()  # Only bursts of specified type
-        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
-        self.ind = np.where(self.selection)[0][self.time_order]
-        logger.info('Selected {} {}s'.format(len(np.where(self.selection)[0]), self.entryname))
+        self.select(names, 'name')
 
     def exclude(self, name):
         """
-        Removes source with given name from the current selection.
+        Removes source with given name from the current selection. Replaced by select
         """
-        selection = np.logical_not(self.records.field('name') == name)
-        self.selection = np.logical_and(self.selection, selection)
-        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
-        self.ind = np.where(self.selection)[0][self.time_order]
-        logger.info('Selected {} {}s by excluding {}'.format(len(np.where(self.selection)[0]), self.entryname, name))
+
+        self.select(name, exclude=True)
 
     def exclude_like(self, name):
         """
@@ -483,7 +569,7 @@ class Minbar(IDLDatabase):
         self.selection = np.logical_and(self.selection, selection)
         self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
         if len(np.where(self.selection)[0]) < len(self.ind):
-            logger.info('Excluded {} {}s by excluding flag(s) {}'.format(len(self.ind)-len(np.where(self.selection)[0]),
+            logger.info('excluded {} {}s by excluding flag(s) {}'.format(len(self.ind)-len(np.where(self.selection)[0]),
                     self.entryname, flags))
         self.ind = np.where(self.selection)[0][self.time_order]
 
@@ -694,6 +780,24 @@ class Bursts(Minbar):
 
         return mjd, rate, error
 
+    def PRE(self, rexp_thresh=1.629):
+        """
+        Select only photospheric radius-expansion (PRE) bursts, according to the standard threshold
+        :param rexp_thresh:
+        :return:
+        """
+
+        selection = self.selection & (self.records.field('rexp') >= rexp_thresh)
+        if ~np.any(selection):
+            logger.warning('no PRE bursts in current selection')
+        else:
+            logger.info('selected {} bursts with PRE (rexp > {})'.format(len(np.where(selection)[0]),
+                                                                        rexp_thresh))
+            self.selection = selection
+
+        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
+        self.ind = np.where(self.selection)[0][self.time_order]
+
     def unique(self):
         """
         Removes multiply-observed bursts, with a priority for XTE
@@ -710,7 +814,7 @@ class Bursts(Minbar):
         self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
         n_excluded = len(self.ind) - len(np.where(self.selection)[0])
         if n_excluded > 0:
-            logger.info('Selected {} unique {}s by excluding {}'.format(len(np.where(self.selection)[0]),
+            logger.info('selected {} unique {}s by excluding {}'.format(len(np.where(self.selection)[0]),
                     self.entryname, n_excluded))
         self.ind = np.where(self.selection)[0][self.time_order]
 
@@ -1042,10 +1146,14 @@ class Sources:
         self.field_labels = self._get_field_labels()
         self._fits_names = list(self.field_names) # Keep track of which fields are in fits file
         self.clear()
-        self.dist, self.diste = self.get_distances(X=X, Gaia=Gaia)
-        self.field_names += ['dist', 'diste']
+        # Now has a bit more information about the distances
+        # self.dist, self.diste = self.get_distances(X=X, Gaia=Gaia)
+        self.dist, self.diste, self.diste_lo, self.dist_method = self.get_distances(X=X, Gaia=Gaia)
+        self.field_names += ['dist', 'diste','diste_lo','dist_method']
         self.field_labels['dist'] = 'Distance (kpc)'
         self.field_labels['diste'] = 'Error on distance (kpc)'
+        self.field_labels['diste_lo'] = 'Lower error on distance (kpc, where defined)'
+        self.field_labels['diste_method'] = 'Distance method'
         self.X = X
         self.Gaia = Gaia
 
@@ -1303,7 +1411,9 @@ class Sources:
                     'Cyg X-2': ((13.1, 2.3), (6.95, 1.16, -0.91, 'G'), (8.9, 0.7), (11.6, 0.9)),
                     'SAX J2224.9+5421': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 6.0), (0.0, 7.9)) }
 
-        distances = { x: (table8[x][1] if (table8[x][1][0] > 0.0 and Gaia) else table8[x][idist]) for x in table8 }
+        # also define a string which determines how the distance was derived
+        distances = { x: (table8[x][1] if (table8[x][1][0] > 0.0 and Gaia) 
+            else table8[x][idist]) for x in table8 }
 
         # logger.warning('distances are outdated, use with caution')
         addl = ''
@@ -1313,16 +1423,24 @@ class Sources:
         logger.info('adopted distances for X={}{}'.format( X, addl))
 
         dist = np.zeros_like(self['ra_obj'])
-        diste = np.zeros_like(dist)
+        diste_hi = np.zeros_like(dist)
+        diste_lo = np.zeros_like(dist)
+        dist_method = np.empty(len(dist), dtype="<U10")
         for i, name in enumerate(self['name']):
             if name in distances:
                 dist[i] = distances[name][0]
                 if len(distances[name]) == 2:
-                    diste[i] = distances[name][1]
+                    diste_hi[i] = distances[name][1]
+                    diste_lo[i] = distances[name][1]
+                    dist_method[i] = 'B'
                 else:
                     # two-sided distances are converted to single-sided, for now
-                    diste[i] = 0.5*(distances[name][1]-distances[name][2])
-        return dist, diste
+                    # diste[i] = 0.5*(distances[name][1]-distances[name][2])
+                    diste_hi[i] = distances[name][1]
+                    diste_lo[i] = -distances[name][2]
+                    dist_method[i] = distances[name][3]
+
+        return dist, diste_hi, diste_lo, dist_method
 
     def __str__(self):
         """
