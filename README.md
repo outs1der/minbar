@@ -14,7 +14,7 @@
 * Place the `minbar` directory in your python path, e.g., the `site-packages` directory.
 * Copy the MINBAR table files `minbar.txt` and `minbar-obs.txt` into the `data` directory, or softlink to the locations
 * Start python and `import minbar`. 
-* All data are presented as numpy arrays, which allows for easy selection of subsets of the data and operations on such selections. See [this introduction](https://docs.scipy.org/doc/numpy-dev/user/quickstart.html) to get started.
+* Base classes are `Bursts`, `Observations`, and `Sources`; creating instances of each one will read the data from the corresponding table file
 * Try the suggested example commands below; see the tutorial jupyter notebook; and also check `__init__.py` for instructions on usage
 
 ### Example Usage ###
@@ -28,15 +28,16 @@ import minbar
 mb = minbar.Bursts() # Load the burst database
 mb.name_like('1636') # Select a source using part of its name
 print (mb.field_labels.keys()) # See which fields are available
+mb.show() # List the selected bursts
+
 time = mb['time'] # Get a field as a numpy array (automatically time-ordered)
-flux = mb['pflux']*1e-9 # Flux in erg/s/cm2
+flux = mb['bpflux'] # Flux in 1e-9 erg/s/cm2
 mb.create_distance_correction() # Include distance information from Sources()
-distance = mb['dist']
-luminosity = flux*mb['distcor'] # Luminosity in erg/s
+luminosity = (flux*mb['distcor']).to('erg s-1') # Isotropic peak luminosity in erg/s
 pca = mb.instr_like('pca') # Get index array for bursts observed with PCA
 pca_luminosity = luminosity[pca] # Luminosity of PCA bursts
 
-mb.name_like('1826') # Replace selection by another source
+mb.clear() # Reset the selection
 mb.select_all(['GS 1826-24', '4U 1636-536']) # Select multiple sources; requires exact names
 mb.clear() # Clear the selection so all sources are included
 mb.exclude_like('1636') # Exclude source from selection
@@ -55,9 +56,10 @@ ra = ms['ra_obj'] # Right ascension for selected source only
 ms.clear() # Clear selection
 ```
 
-Note that Sources() does not have select_all() or exclude_like()
+Note that Sources() methods do not include `select_all()` or `exclude_like()`
 
 Below are some basic examples to analyse some (new?) X-ray data and search for bursts
+(under development)
 
 ```
 import minbar
@@ -86,18 +88,3 @@ print(test)
  5.42090903e+08]
 ```
 
-### pandas ###
-
-[pandas](https://pandas.pydata.org/) is a data analysis library with many
-features. The Minbar databases can be loaded as pandas DataFrames:
-
-```
-#!python
-
-import minbar.to_pandas
-mb = minbar.to_pandas.load_bursts() # Create a DataFrame with burst data
-mo = minbar.to_pandas.load_observations()
-ms = minbar.to_pandas.load_sources()
-df = mb.get_source('1636') # Select a source using part of its name
-df = mb.get_instrument('pca') # Select an instrument ('pca', 'wfc', or 'jemx')
-```
