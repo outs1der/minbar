@@ -11,7 +11,9 @@
 
 ### Getting Started ###
 
+* Clone/download the repository to your local machine
 * Place the `minbar` directory in your python path, e.g., the `site-packages` directory.
+* Alternatively, install the package using `python3 -m pip install ./` from the distribution directory
 * Copy the MINBAR table files `minbar.txt` and `minbar-obs.txt` into the `data` directory, or softlink to the locations
 * Start python and `import minbar`. 
 * Base classes are `Bursts`, `Observations`, and `Sources`; creating instances of each one will read the data from the corresponding table file
