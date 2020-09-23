@@ -18,7 +18,7 @@ setuptools.setup(
     # Needed to actually package something
     packages=['minbar'],
     # Needed for dependencies; probably not complete
-    install_requires=['numpy', 'pandas', 'astropy'],
+    install_requires=['numpy', 'pandas', 'astropy', 'scipy'],
     # *strongly* suggested for sharing
     version='1.0.0',
     # The license can be anything you like
