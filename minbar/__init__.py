@@ -850,19 +850,25 @@ class Bursts(Minbar):
 
         return mjd, rate, error
 
-    def PRE(self, rexp_thresh=1.629):
+    def PRE(self, rexp_thresh=1.629, marginal=False):
         """
-        Select only photospheric radius-expansion (PRE) bursts, according to the standard threshold
+        Select only photospheric radius-expansion (PRE) bursts, according
+        to the standard threshold
+        Additional marginal flag will optionally include those "marginal"
+        events
         :param rexp_thresh:
         :return:
         """
 
-        selection = self.selection & (self.records.field('rexp') >= rexp_thresh)
+        marginal_incl = ('excluding','including')[int(marginal)]
+        selection = self.selection \
+            & (self.records.field('rexp') >= rexp_thresh) \
+            & ((self.records.field('rexp') < 3.0) | marginal)
         if ~np.any(selection):
             logger.warning('no PRE bursts in current selection')
         else:
-            logger.info('selected {} bursts with PRE (rexp > {})'.format(len(np.where(selection)[0]),
-                                                                        rexp_thresh))
+            logger.info('selected {} bursts with PRE (rexp > {}), {} marginal cases'.format(
+                len(np.where(selection)[0]), rexp_thresh, marginal_incl))
             self.selection = selection
 
         self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
