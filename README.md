@@ -2,8 +2,10 @@
 
 ### python-minbar ###
 
-* Python package for analysing observational data of thermonuclear (type-I) X-ray bursts observed by _RXTE_/PCA, _BeppoSAX_/WFC and _INTEGRAL_/JEM-X
-* Provides facilities for reading MINBAR ASCII data tables, available via the online data table repository at https://doi.org/10.26180/5e4a697d9b8b6; see https://arxiv.org/abs/2003.00685 
+Python package for analysing observational data of thermonuclear (type-I) X-ray bursts observed by _RXTE_/PCA, _BeppoSAX_/WFC and _INTEGRAL_/JEM-X
+
+Provides facilities for reading MINBAR ASCII data tables, available via the online data table repository at https://doi.org/10.26180/5e4a697d9b8b6; see https://arxiv.org/abs/2003.00685 
+
 * Requires Python 3, NumPy, and Astropy (originally adapted from Python 2)
 * Compatible with MINBAR data release 1
 * Includes code, under development, to extend the MINBAR sample
@@ -33,7 +35,7 @@ print (mb.field_labels.keys()) # See which fields are available
 mb.show() # List the selected bursts
 
 time = mb['time'] # Get a field as a numpy array (automatically time-ordered)
-mb[time > 54000.].show() # show all the bursts after the specified time
+id = mb[time > 54000.]['entry'] # extract ID #s for all the bursts after the specified time
 flux = mb['bpflux'] # Flux in 1e-9 erg/s/cm2
 sub = mb[['time','bpflux']] # extract a subset of the columns, for the given selection
 mb.create_distance_correction() # Include distance information from Sources()
