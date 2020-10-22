@@ -523,9 +523,20 @@ class Minbar(IDLDatabase):
         Modified to allow getting data from an attribute, if it is
         not available in the standard database.
         """
-        if field in self.field_names:
-            return self.get_records().field(field)
+        fields_ok = True
+        if np.shape(field) != ():
+            for _field in field:
+                fields_ok = fields_ok & (_field in self.field_names)
+
         else:
+            fields_ok = field in self.field_names
+
+        if fields_ok:
+            # The field method restricts returns to a single attribute
+            # return self.get_records().field(field)
+            return self.get_records()[field]
+        else:
+            # Really need to check that the attributes are all present here
             return getattr(self, field)[self.ind]
 
 
@@ -539,16 +550,41 @@ class Minbar(IDLDatabase):
 
     def __getitem__(self, field):
         """
-        Shorthand for get().
-        Expand the usage here to also return the item with the entry number
+        Originally this routine was just a shorthand for get(), but has been
+        expanded to to also return the item with the entry number; return selected
+        items from the current selection; and return
+        Note that the ID selections below ignore the data selection, and also
+        return astropy Tables (rather than Bursts or Observations objects)
+
+        Usage:
+        b['time'] - return all the times for the current selection
+        b[2094] - return the entry for ID 2094 (ignores current selection)
+        b[[2094,2095]] - return the entry for IDs 2094, 2095
+        b[['time','tau','bpflux']] - return all the attributes for the current selection
+        b[b['time'] > 54000.] - return
         """
 
-        if type(field) == str:
-            return self.get(field)
+        if np.shape(field) != ():
+            # Array argument
+            if type(field[0]) == str:
+                return self.get(field)
+            elif type(field[0]) == bool or type(field[0]) == np.bool_:
+                # Boolean argument
+                return self.get_records()[field]
+            elif np.issubdtype(type(field[0]), np.integer):
+                # integer arrays, interpret as IDs
+                return self.records.loc[field]
+            else:
+                logger.error("can't interpret argument of type {}, skipping".format(type(field)))
+                return None
+        else:
+            # Scalar argument here
+            if type(field) == str:
+                return self.get(field)
 
-        # The code below requires that entry is set up as the index
-        # return self.records[self.records['entry'] == field]
-        return self.records.loc[field]
+            # The code below requires that entry is set up as the index
+            # return self.records[self.records['entry'] == field]
+            return self.records.loc[field]
 
     def instr_like(self, instrument):
         """
@@ -557,8 +593,8 @@ class Minbar(IDLDatabase):
         the following aliases are provided: 'pca', 'wfc', 'jemx'.
         """
         alias = {'pca': 'XP', 'wfc': 'SW', 'jemx': 'IJ'}
-        if instrument in alias:
-            instrument = alias[instrument]
+        if instrument.lower() in alias:
+            instrument = alias[instrument.lower()]
 
         # This is a crappy way to try to make things work with both strings and byte arrays
         try:
@@ -578,14 +614,14 @@ class Minbar(IDLDatabase):
         alias = {'pca': 'XP', 'wfc': 'SW', 'jemx': 'IJ'}
 
         if np.shape(instrument) != ():
-            _instrument = [alias[x] if x in alias else x for x in instrument]
+            _instrument = [alias[x.lower()] if x.lower() in alias else x for x in instrument]
             instr_all = []
             for i in _instrument:
                 instr_all += self.attr_like(i, 'instr')
             self.select(instr_all, 'instr', exclude=exclude)
             return self
-        elif instrument in alias:
-            _instrument = alias[instrument]
+        elif instrument.lower() in alias:
+            _instrument = alias[instrument.lower()]
         else:
             _instrument = instrument
 

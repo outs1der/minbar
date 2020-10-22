@@ -31,7 +31,9 @@ print (mb.field_labels.keys()) # See which fields are available
 mb.show() # List the selected bursts
 
 time = mb['time'] # Get a field as a numpy array (automatically time-ordered)
+mb[time > 54000.].show() # show all the bursts after the specified time
 flux = mb['bpflux'] # Flux in 1e-9 erg/s/cm2
+sub = mb[['time','bpflux']] # extract a subset of the columns, for the given selection
 mb.create_distance_correction() # Include distance information from Sources()
 luminosity = (flux*mb['distcor']).to('erg s-1') # Isotropic peak luminosity in erg/s
 pca = mb.instr_like('pca') # Get index array for bursts observed with PCA
