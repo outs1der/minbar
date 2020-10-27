@@ -20,7 +20,7 @@ setuptools.setup(
     # Needed for dependencies; probably not complete
     install_requires=['numpy', 'pandas', 'astropy', 'scipy'],
     # *strongly* suggested for sharing
-    version='1.2.0',
+    version='1.2.1',
     # The license can be anything you like
     license='GNU GPLv3',
     description='Python package for analysing observational data of thermonuclear (type-I) X-ray bursts observed by RXTE/PCA, BeppoSAX/WFC and INTEGRAL/JEM-X', 
