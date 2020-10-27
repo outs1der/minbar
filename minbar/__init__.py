@@ -212,6 +212,10 @@ def verify_path(source, path, source_path, verbose=True):
     """
 
     has_dir = [False] * len(source)
+
+    if path is None: # flag for nonexistent source data path
+        return has_dir, 0, len(source)
+
     nonmatched = 0
     with os.scandir('/'.join([MINBAR_ROOT, path, 'data'])) as entries:
         for entry in entries:
@@ -298,10 +302,14 @@ class Minbar(IDLDatabase):
         self.instruments = {'XP': Instrument('PCA', source_name=self.names),
                             'SW': Instrument('WFC', source_name=self.names),
                             'IJ': Instrument('JEM-X', source_name=self.names)}
+
         # local_data is set to true if *any* of the source paths are found
-        self.local_data = False
-        for key in self.instruments.keys():
-            self.local_data = self.local_data | np.any(self.instruments[key].has_dir)
+        self.local_data = os.path.isdir(MINBAR_ROOT)
+        if self.local_data:
+            # the path exists, so check if there's any data there
+            self.local_data = False
+            for key in self.instruments.keys():
+                self.local_data = self.local_data | np.any(self.instruments[key].has_dir)
 
         # set the default attributes for displaying via the show() method
         self.attributes_default = ['entry','name','obsid','instr','sflag']
@@ -1636,8 +1644,11 @@ class Instrument:
             self.path = path
         else:
             # sys.exit(1)
-            logger.error('need a valid path for the data files')
-            return None
+            # logger.error('need a valid path for the data files')
+            # avoid printing the warning, will be annoying for multiple instruments
+            # logger.warning('MINBAR_ROOT path for raw data does not exist')
+            # return None
+            self.path = None
 
         # Set the list of names. If not provided we'll create a Sources object and read it
         # (as a chararray) from there; otherwise you can pass it as a parameter
