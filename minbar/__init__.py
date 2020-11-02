@@ -562,14 +562,15 @@ class Minbar(IDLDatabase):
         expanded to to also return the item with the entry number; return selected
         items from the current selection; and return
         Note that the ID selections below ignore the data selection, and also
-        return astropy Tables (rather than Bursts or Observations objects)
+        return astropy Tables (rather than Bursts or Observations objects) so
+        you unfortunately can't use the show() method after selecting
 
         Usage:
         b['time'] - return all the times for the current selection
         b[2094] - return the entry for ID 2094 (ignores current selection)
         b[[2094,2095]] - return the entry for IDs 2094, 2095
         b[['time','tau','bpflux']] - return all the attributes for the current selection
-        b[b['time'] > 54000.] - return
+        b[b['time'] > 54000.] - return only those items with the selected properties
         """
 
         if np.shape(field) != ():
