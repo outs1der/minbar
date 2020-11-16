@@ -562,14 +562,15 @@ class Minbar(IDLDatabase):
         expanded to to also return the item with the entry number; return selected
         items from the current selection; and return
         Note that the ID selections below ignore the data selection, and also
-        return astropy Tables (rather than Bursts or Observations objects)
+        return astropy Tables (rather than Bursts or Observations objects) so
+        you unfortunately can't use the show() method after selecting
 
         Usage:
         b['time'] - return all the times for the current selection
         b[2094] - return the entry for ID 2094 (ignores current selection)
         b[[2094,2095]] - return the entry for IDs 2094, 2095
         b[['time','tau','bpflux']] - return all the attributes for the current selection
-        b[b['time'] > 54000.] - return
+        b[b['time'] > 54000.] - return only those items with the selected properties
         """
 
         if np.shape(field) != ():
@@ -592,7 +593,16 @@ class Minbar(IDLDatabase):
 
             # The code below requires that entry is set up as the index
             # return self.records[self.records['entry'] == field]
-            return self.records.loc[field]
+            result = self.records.loc[field]
+
+            if (type(self) == Observations):
+                if (result['nburst'] > 0):
+                    # add the burst details to the record, via the meta flag
+                    result.meta['bursts'] = self.bursts[self.bursts['entry_obs'] == field]
+                else:
+                    result.meta['bursts'] = None
+
+            return result
 
     def instr_like(self, instrument):
         """
@@ -1065,14 +1075,27 @@ class Observations(Minbar):
     entryname = 'observation'
 
 
-    def __init__(self, filename=None, type=None, IDL=False):
+    def __init__(self, filename=None, type=None, IDL=False, bursts=True, verbose=True):
         """
         Load the database of observations.
         """
         if filename==None:
             filename = self.get_default_path('minbar-obs')
 
+        if verbose:
+            logger.info('loading observations, please wait...')
+
         Minbar.__init__(self, filename, IDL=IDL)
+
+        if bursts:
+            # by default also import the bursts
+            # I think filename is only used for the IDL option, but try to fix that here
+            bfilename = filename
+            if bfilename is not None:
+                bfilename = bfilename[:-4] # drop the -obs part
+            self.bursts = Bursts(filename=bfilename, IDL=IDL)
+        else:
+            self.bursts = None
 
         self.type = type
         self.clear()
@@ -1103,6 +1126,7 @@ class Observation:
     """
     This object is intended to allow all the possible actions you might have on an
     observation. You can create it from a minbar entry, or given an instrument, source name and obs ID
+
     Example usage:
     import minbar
     o = minbar.Observations()
@@ -1114,23 +1138,44 @@ class Observation:
         """
         Create an observation instance, either from a MINBAR obs entry, or by-hand
         Ideally this object should make available every parameter in the MINBAR observation table
-        :param obs_entry: 
+        It'd be nice to be able to create this just given the obs ID (for example), but
+        then we'd need to keep a copy of the Observations object, which seems wasteful
+
+        :param obs_entry:
         :param instr: 
         :param source: 
         :param obsid: 
         """
 
         if obs_entry is not None:
-            logger.warning('initialisation from obs entry not yet completely implemented')
-            # Really need to create an instrument here
+            # logger.warning('initialisation from obs entry not yet completely implemented')
+
+            # create an instrument here
             label = [key for key, value in MINBAR_INSTR_LABEL.items() if value == obs_entry['instr'][:2]][0]
             # print (label)
+
+            # Don't set these parameters yet, as they'll be defined outside this block
             instr = Instrument(label)
             name = obs_entry['name']
             obsid = obs_entry['obsid']
 
-            self.tstart = obs_entry['tstart']
-            self.tstop = obs_entry['tstop']
+            # self.tstart = obs_entry['tstart']
+            # self.tstop = obs_entry['tstop']
+            # Copy all the columns to the new object
+            for col in obs_entry.columns:
+                if col in UNITS.keys():
+                    setattr(self, col, obs_entry[col]*UNITS[col])
+                else:
+                    setattr(self, col, obs_entry[col])
+
+            # add any bursts present
+            if self.nburst > 0:
+                # self.bursts =
+                self.bursts = obs_entry.meta['bursts']
+
+        else:
+            # this observation isn't in MINBAR, so it has no entry
+            self.entry = None
 
         # Potentially need to check here that all of the passed parameters are set
         self.instr = instr
