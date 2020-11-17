@@ -573,7 +573,7 @@ class Minbar(IDLDatabase):
         b[b['time'] > 54000.] - return only those items with the selected properties
         """
 
-        if np.shape(field) != ():
+        if (np.shape(field) != ()) & (np.shape(field) != (1,)):
             # Array argument
             if type(field[0]) == str:
                 return self.get(field)
