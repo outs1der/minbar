@@ -1764,13 +1764,32 @@ Lightcurve(s): {}
 Spectra: {}""".format(self.name, self.label, self.path, self.lightcurve, self.spectrum)
 
 
+    def filename_with_obsid(self, template, obsid, exclude=None):
+        """
+        Function to return a filename (possibly including path)
+        incorporating the obsservation ID, as used for RXTE and NuSTAR
+        Also have the option of excluding a character from the obsid string
+        See pca_lightcurve_filename for example usage
+        :return:
+        """
+
+        if not ('{}' in template):
+            logger.warning("template doesn't seem to include obsid placeholder")
+
+        if exclude:
+            obsid = obsid.replace(exclude, "")
+
+        return template.format(obsid)
+
+
     def pca_lightcurve_filename(self, obsid):
         """
         Function to return the lightcurve name for PCA observations
         :return:
         """
 
-        return 'stdprod/xp{}_n1.lc.gz'.format(obsid.replace("-", ""))
+        # return 'stdprod/xp{}_n1.lc.gz'.format(obsid.replace("-", ""))
+        return self.filename_with_obsid('stdprod/xp{}_n1.lc.gz', obsid, "-")
 
 
     def analyse_persistent(self, src, obsid):
