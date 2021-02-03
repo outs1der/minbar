@@ -50,6 +50,7 @@ DATE = datetime.now()
 
 MINBAR_ROOT = '/Users/Shared/burst/minbar'
 # LOCAL_DATA = True
+MINBAR_URL = 'https://burst.sci.monash.edu/wiki/uploads/MINBAR/'
 
 # Bytearr entries are for consistency between the IDL and ASCII
 # versions of the data
@@ -883,10 +884,18 @@ class Bursts(Minbar):
         :return:
         """
 
+        mjd, rate, error = None, None, None
+
+        if not (id in self['entry']):
+            logger.error('not a valid burst ID')
+
+        t0 = self[id]['time']
         if self.local_data:
-            # Try to get the file locally
+            # Try to get the file locally. At the moment this relies on the observation lightcurves,
+            # which are in different units; so is not really consistent with the version that gets
+            # the lightcurves from the online repo
+            logger.warning('getting burst data segment from observation files, careful with units')
             oid = self[id]['entry_obs']
-            t0 = self[id]['time']
             if post is None:
                 post = 5. * self[id]['dur']
 
@@ -900,7 +909,20 @@ class Bursts(Minbar):
 
         else:
             # Try to get the data remotely
-            logger.error('Remote data retrieval not yet implemented')
+            # URLs for the data look like
+            # https://burst.sci.monash.edu/wiki/uploads/MINBAR/bursts/0001_lc.csv
+
+            # logger.error('Remote data retrieval not yet implemented')
+
+            url = MINBAR_URL+'bursts/{0:04d}_lc.csv'.format(id)
+
+            data = pd.read_csv(url)
+            if type(data) == pd.DataFrame:
+                mjd = (data['time'].values*u.s).to('d') + t0*u.d
+                rate = data['flux']*CFLUX_U # bit of a misnomer, units of counts/cm^2/s
+                error = data['error']*CFLUX_U
+            else:
+                logger.error('Some problem with the remote data file')
 
         return mjd, rate, error
 
