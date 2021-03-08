@@ -50,7 +50,7 @@ DATE = datetime.now()
 
 MINBAR_ROOT = '/Users/Shared/burst/minbar'
 # LOCAL_DATA = True
-MINBAR_URL = 'https://burst.sci.monash.edu/wiki/uploads/MINBAR/'
+MINBAR_URL = 'https://burst.sci.monash.edu/'
 
 # Bytearr entries are for consistency between the IDL and ASCII
 # versions of the data
@@ -199,7 +199,9 @@ def mjd_to_ss(time):
 
     _time = Time(time, scale='utc', format='mjd')
 
-    return (_time.tt.mjd - 49353.000696574074) * 86400. - 3.378431
+    # Omitted the 3.378 s offset to line up the WFC and PCA time-resolved
+    # spectral files
+    return (_time.tt.mjd - 49353.000696574074) * 86400. #- 3.378431
 
 def verify_path(source, path, source_path, verbose=True):
     """
@@ -752,17 +754,22 @@ class Bursts(Minbar):
         :param id:
         :return:
         Example usage:
-        data = b.get_burst_data(1918)
+        data1 = b.get_burst_data(2380)
+        data2 = b.get_burst_data(1600)
         """
+
+        instr = self[id]['instr']
+        if instr[0:2] == 'IJ':
+            logger.error('Time-resolved spectroscopy not available for JEM-X bursts')
+            return None
 
         wfcdataroot = 'wfcspec_vs2'
 
+        # First we set the _file variable, with the location of the data
+        # This can be the name of a file stored locally, or a URL pointing
+        # at the MINBAR website
         if self.local_data:
             # Try to get the file locally
-            instr = self[id]['instr']
-            if instr[0:2] == 'IJ':
-                logger.error('Time-resolved spectroscopy not available for JEM-X bursts')
-                return None
 
             # Get the source path
             # Can probably package this into the Minbar class for wider use
@@ -772,6 +779,7 @@ class Bursts(Minbar):
                 logger.error('No source directory for this burst')
                 return None
 
+            # Different naming conventions for the local files, sadly
             if instr[0:2] == 'SW':
                 # Get WFC data
                 # File naming convention is a bit messed up in the directory Jean provided
@@ -792,55 +800,6 @@ class Bursts(Minbar):
                 _file = '/'.join([_path, file_pref ]) \
                         + '_{}w{}_{:02d}.spec'.format( self[id]['obsid'].zfill(5), instr[2:], self[id]['bnum'])
 
-                if not os.path.isfile(_file):
-                    logger.error('time-resolved spectroscopy file not found!')
-                else:
-                    # Now read in the data...format is
-                    # (1) MJD interval
-                    # (2) kT of black body model[keV]
-                    # (3) 1 sigma error in kT[keV]
-                    # (4) black body radius R[km for d=10 kpc]
-                    # (5) 1 sigma error in R[km for d=10 kpc]
-                    # (6) 3 - 25 keV flux[erg / cm ^ 2 / s]
-                    # (7) 1 sigma error on 3 - 25 keV flux[erg / cm ^ 2 / s]
-                    # (8) Unabsorbed bolometric flux of black body[erg / cm ^ 2 / s]
-                    # (9) Error in unabsorbed bolometric flux, based on delta(chi2) = 2.7[erg / cm ^ 2 / s]
-                    # (10) chi ^ 2 - red
-
-                    _data = pd.read_csv(_file,
-                        names=['trange','kT','kT_err','rad','rad_err','flux_3_25','flux_3_25_err',
-                               'flux','fluxerr','chisq'], sep='\s+')
-                    nspec=len(_data)
-                    time=np.zeros(nspec)
-                    dt=np.zeros(nspec)
-                    for j in range(nspec):
-                        tmp=_data['trange'][j].split('-')
-                        time[j]=float(tmp[0])
-                        dt[j]=(float(tmp[1])-time[j])*86400.
-                    _data['dt'] = dt
-                    # This calculation assumes UTC for the time ranges
-                    _data['time'] = (time-self[id]['time'])*86400.
-
-                    # These flux errors are FAR too big
-                    _data['flux'] *= 1e9
-                    _data['fluxerr'] *= 1e9
-                    _data['flux_min'] = _data['flux']-_data['fluxerr']
-                    _data['flux_max'] = _data['flux']+_data['fluxerr']
-                    logger.warning('BeppoSAX/WFC flux is 2-10 keV only!')
-                    lz=np.where(_data['flux_min'] < 0.)[0]
-                    if len(lz) > 0:
-                        _data['flux_min'][lz]=0.1
-                    _data['kT_min'] = _data['kT']-_data['kT_err']
-                    _data['kT_max'] = _data['kT']+_data['kT_err']
-                    _data['rad_min'] = _data['rad']-_data['rad_err']
-                    _data['rad_max'] = _data['rad']+_data['rad_err']
-
-                    # Need to be aware of different conventions here for the files; SAX files
-                    # have radius in units of km/10kpc, while RXTE is (km/10kpc)^2
-
-                    _data['rad'] = _data['rad']**2
-                    _data['rad_min'] = _data['rad_min']**2
-                    _data['rad_max'] = _data['rad_max']**2
 
             elif instr[0:2] == 'XP':
                 # Get PCA data
@@ -851,23 +810,89 @@ class Bursts(Minbar):
                                   self[id]['obsid'], 'burst{}'.format(self[id]['bnum']) ])
                 _file = '/'.join([_path, 'analysis/bbfit_kabs.log'])
 
-                _data = pd.read_csv(_file, comment='#',
-                    names=['time', 'r', 're', 'dt', 'nH', 'nH_min', 'nH_max', 'kT', 'kT_min', 'kT_max',
-                        'rad', 'rad_min', 'rad_max', 'chisq', 'rawflux', 'flux', 'flux_min', 'flux_max'], sep='\s+')
-
-                # _data = _path # for testing
-                _data['fluxerr'] = 0.5*(_data['flux_max']-_data['flux_min'])
-
-                # Need to adjust time from SS to seconds post star time
-
-                _data['time'] -= mjd_to_ss(self[id]['time'])
-
             else:
-                logger.error('time-resolved spectroscopy not yet implemented for this instrument')
+                logger.error('local files not available for instrument {}'.format(instr))
+                return None
+
+            # Check that local files exist
+            if not os.path.isfile(_file):
+                logger.error('time-resolved spectroscopy file {} not found!'.format(_file))
+                return None
 
         else:
             # Try to get the data remotely
-            logger.error('Remote data retrieval not yet implemented')
+            # URLs for the time-resolved spectroscopic data look like
+            # https://burst.sci.monash.edu/minbar/data/trs/0001_trs.dat
+
+            # logger.error('Remote data retrieval not yet implemented')
+
+            _file = MINBAR_URL+'minbar/data/trs/{0:04d}_trs.dat'.format(id)
+
+            # Should also check here that the remote file exists...
+
+        # Now that we've defined the file location, read in the data
+        # The format is differrent for different files
+        if instr[0:2] == 'SW':
+            # Now read in the data...format is
+            # (1) MJD interval
+            # (2) kT of black body model[keV]
+            # (3) 1 sigma error in kT[keV]
+            # (4) black body radius R[km for d=10 kpc]
+            # (5) 1 sigma error in R[km for d=10 kpc]
+            # (6) 3 - 25 keV flux[erg / cm ^ 2 / s]
+            # (7) 1 sigma error on 3 - 25 keV flux[erg / cm ^ 2 / s]
+            # (8) Unabsorbed bolometric flux of black body[erg / cm ^ 2 / s]
+            # (9) Error in unabsorbed bolometric flux, based on delta(chi2) = 2.7[erg / cm ^ 2 / s]
+            # (10) chi ^ 2 - red
+
+            _data = pd.read_csv(_file,
+                                names=['trange', 'kT', 'kT_err', 'rad', 'rad_err', 'flux_3_25', 'flux_3_25_err',
+                                       'flux', 'fluxerr', 'chisq'], sep='\s+')
+            nspec = len(_data)
+            time = np.zeros(nspec)
+            dt = np.zeros(nspec)
+            for j in range(nspec):
+                tmp = _data['trange'][j].split('-')
+                time[j] = float(tmp[0])
+                dt[j] = (float(tmp[1]) - time[j]) * 86400.
+            _data['dt'] = dt
+            # This calculation assumes UTC for the time ranges
+            _data['time'] = (time - self[id]['time']) * 86400.
+
+            # These flux errors are FAR too big
+            _data['flux'] *= 1e9
+            _data['fluxerr'] *= 1e9
+            _data['flux_min'] = _data['flux'] - _data['fluxerr']
+            _data['flux_max'] = _data['flux'] + _data['fluxerr']
+            logger.warning('BeppoSAX/WFC flux is 2-10 keV only!')
+            lz = np.where(_data['flux_min'] < 0.)[0]
+            if len(lz) > 0:
+                _data['flux_min'][lz] = 0.1
+            _data['kT_min'] = _data['kT'] - _data['kT_err']
+            _data['kT_max'] = _data['kT'] + _data['kT_err']
+            _data['rad_min'] = _data['rad'] - _data['rad_err']
+            _data['rad_max'] = _data['rad'] + _data['rad_err']
+
+            # Need to be aware of different conventions here for the files; SAX files
+            # have radius in units of km/10kpc, while RXTE is (km/10kpc)^2
+
+            _data['rad'] = _data['rad'] ** 2
+            _data['rad_min'] = _data['rad_min'] ** 2
+            _data['rad_max'] = _data['rad_max'] ** 2
+
+        elif instr[0:2] == 'XP':
+
+            _data = pd.read_csv(_file, comment='#',
+                                names=['time', 'r', 're', 'dt', 'nH', 'nH_min', 'nH_max', 'kT', 'kT_min', 'kT_max',
+                                       'rad', 'rad_min', 'rad_max', 'chisq', 'rawflux', 'flux', 'flux_min', 'flux_max'],
+                                sep='\s+')
+
+            # _data = _path # for testing
+            _data['fluxerr'] = 0.5 * (_data['flux_max'] - _data['flux_min'])
+
+            # Need to adjust time from SS to seconds post star time
+
+            _data['time'] -= mjd_to_ss(self[id]['time'])
 
         return _data
 
@@ -914,7 +939,7 @@ class Bursts(Minbar):
 
             # logger.error('Remote data retrieval not yet implemented')
 
-            url = MINBAR_URL+'bursts/{0:04d}_lc.csv'.format(id)
+            url = MINBAR_URL+'wiki/uploads/MINBAR/bursts/{0:04d}_lc.csv'.format(id)
 
             data = pd.read_csv(url)
             if type(data) == pd.DataFrame:
