@@ -894,6 +894,15 @@ class Bursts(Minbar):
 
             _data['time'] -= mjd_to_ss(self[id]['time'])
 
+            # The dt value includes the corrections for deadtime. For consistency with the BeppoSAX data, we
+            # also want a "well-behaved" dt array that corresponds to the difference between the time bins
+
+            _data['exp'] = _data['dt']
+            _dt = _data['time'][1:] - _data['time'][:-1]
+            _dt = np.append(_dt, _dt[-1])
+            assert _data.exp.values[-1] < _dt[-1] # check if our guess is wrong
+            _data['dt'] = _dt
+
         return _data
 
     def get_lc(self, id, pre=16., post=None):
