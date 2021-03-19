@@ -898,7 +898,7 @@ class Bursts(Minbar):
             # also want a "well-behaved" dt array that corresponds to the difference between the time bins
 
             _data['exp'] = _data['dt']
-            _dt = _data['time'][1:] - _data['time'][:-1]
+            _dt = _data['time'].values[1:] - _data['time'].values[:-1]
             _dt = np.append(_dt, _dt[-1])
             assert _data.exp.values[-1] < _dt[-1] # check if our guess is wrong
             _data['dt'] = _dt
