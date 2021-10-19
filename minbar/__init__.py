@@ -533,6 +533,10 @@ class Minbar(IDLDatabase):
         result.
         Modified to allow getting data from an attribute, if it is
         not available in the standard database.
+        Mainly for use by __getitem__
+        :param field: field name or array of field names
+        :return: astropy MaskedColumn giving the data subject to the
+                 current selection
         """
         fields_ok = True
         if np.shape(field) != ():
@@ -580,7 +584,7 @@ class Minbar(IDLDatabase):
             # Array argument
             if type(field[0]) == str:
                 return self.get(field)
-            elif type(field[0]) == bool or type(field[0]) == np.bool_:
+            elif (type(field[0]) == bool) or (type(field[0]) == np.bool_) or (type(field) == np.ma.core.MaskedArray):
                 # Boolean argument
                 return self.get_records()[field]
             elif np.issubdtype(type(field[0]), np.integer):
