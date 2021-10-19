@@ -252,6 +252,9 @@ class Minbar(IDLDatabase):
     This class is provided to access EITHER the IDL database or the information via the MRT tables
     Gradually moving the methods from the Burst class here, so they can also be used by the
     Observations class
+    Behaviour is controlled by the selection attribute, which indicates which of the table entries
+    are selected for display or data extraction
+    Ordering is persistent and is controlled by the order attribute, by default time ordering
     """
 
     def __init__(self, filename=None, IDL=False):
@@ -321,10 +324,12 @@ class Minbar(IDLDatabase):
         else:
             self.attributes_default += ['tstart','tstop']
 
+
     def show(self, attributes=None, all=False):
         """
         Display the object in a user-friendly way
         :param attributes:
+        :param all:
         :return:
         """
 
@@ -335,7 +340,7 @@ class Minbar(IDLDatabase):
             in_attr_list = True
             for attr in attributes:
                 in_attr_list = in_attr_list & (attr in self.field_names)
-                print (attr, in_attr_list)
+                # print (attr, in_attr_list)
             if not in_attr_list:
                 logger.error("attribute not present in table")
                 return
@@ -343,7 +348,7 @@ class Minbar(IDLDatabase):
         if all:
             self.records[self.selection][attributes].pprint_all()
         else:
-            self.records[self.selection][attributes].pprint()
+            self.records[self.selection][attributes][self.order].pprint()
 
     def fix_labels(self):
         """
@@ -392,6 +397,7 @@ class Minbar(IDLDatabase):
         else:
             return self.records.field('type') == self.type
 
+
     def clear(self):
         """
         Clear the selection. If self.type is not None, only bursts of the given
@@ -399,8 +405,10 @@ class Minbar(IDLDatabase):
         """
         self.name = ''
         self.selection = self.get_type()
-        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
-        self.ind = np.where(self.selection)[0][self.time_order]
+        self.order_field = self.timefield
+        self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
+        self.ind = np.where(self.selection)[0][self.order]
+
 
     def select(self, value, attribute='name', exclude=False):
         """
@@ -444,8 +452,8 @@ class Minbar(IDLDatabase):
 
         # Retain the time order for the index
 
-        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
-        self.ind = np.where(self.selection)[0][self.time_order]
+        self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
+        self.ind = np.where(self.selection)[0][self.order]
         if attribute == 'name':
             self.name = value
             logger.info('{} {} {}s from {}'.format(action, n_action, self.entryname, self.name))
@@ -455,6 +463,35 @@ class Minbar(IDLDatabase):
         # Return self so we can "cascade" selections
 
         return self
+
+    def sort(self, attribute='time', ascending=True, descending=False):
+        """
+        Basic sort functionality; will modify the default ordering of the selection,
+        until another sort parameter is chosen, or a call to clear() is made
+        (which replaces the default sort field as time)
+
+        Usage:
+        b.sort('tdel',descending=True) # sort the selected bursts in descending order
+                                       #   of the time since the last burst
+
+        :param attribute: (single) table attribute to sort on
+        :param ascending: set to False to sort descending instead
+        :param descending: set to True to sort descending instead
+        :return: sorted object
+        """
+
+        if attribute not in self.field_names:
+            logger.error('attribute {} not present in table, skipping sort'.format(attribute))
+            return self
+
+        self.order_field = attribute
+        self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
+        if (not ascending) or descending:
+            self.order = self.order[::-1]
+        self.ind = np.where(self.selection)[0][self.order]
+
+        return self
+
 
     def obsid(self, obsid):
         """
@@ -560,7 +597,7 @@ class Minbar(IDLDatabase):
         Get the time ordered records that are currently
         selected.
         """
-        return self.records[self.selection][self.time_order]
+        return self.records[self.selection][self.order]
 
 
     def __getitem__(self, field):
@@ -698,11 +735,11 @@ class Minbar(IDLDatabase):
         """
         selection = [re.search('['+flags+']',x) is None for x in self.records['sflag']]
         self.selection = np.logical_and(self.selection, selection)
-        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
+        self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
         if len(np.where(self.selection)[0]) < len(self.ind):
             logger.info('excluded {} {}s by excluding flag(s) {}'.format(len(self.ind)-len(np.where(self.selection)[0]),
                     self.entryname, flags))
-        self.ind = np.where(self.selection)[0][self.time_order]
+        self.ind = np.where(self.selection)[0][self.order]
 
 
 class Bursts(Minbar):
@@ -749,7 +786,10 @@ class Bursts(Minbar):
             self.type = type
         else:
             self.type = None
+
+        # Among other things, this call sets the selection, order, order_field and ind arrays
         self.clear()
+
 
     def get_burst_data(self, id):
         """
@@ -985,8 +1025,8 @@ class Bursts(Minbar):
                 len(np.where(selection)[0]), rexp_thresh, marginal_incl))
             self.selection = selection
 
-        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
-        self.ind = np.where(self.selection)[0][self.time_order]
+        self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
+        self.ind = np.where(self.selection)[0][self.order]
 
     def unique(self):
         """
@@ -1001,12 +1041,12 @@ class Bursts(Minbar):
                                   np.char.array(self.records['instr']).startswith('XP'))
         self.selection = np.logical_and(self.selection, selection)
 
-        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
+        self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
         n_excluded = len(self.ind) - len(np.where(self.selection)[0])
         if n_excluded > 0:
             logger.info('selected {} unique {}s by excluding {}'.format(len(np.where(self.selection)[0]),
                     self.entryname, n_excluded))
-        self.ind = np.where(self.selection)[0][self.time_order]
+        self.ind = np.where(self.selection)[0][self.order]
 
         # Return self so we can "cascade" selections
 
@@ -1158,6 +1198,8 @@ class Observations(Minbar):
             self.bursts = None
 
         self.type = type
+
+        # Among other things, this call sets the selection, order, order_field and ind arrays
         self.clear()
 
     def good(self):
@@ -1168,11 +1210,11 @@ class Observations(Minbar):
         self.exclude_flag('bcdefg')
         selection = (self.records['flux'] > 3.*self.records['e_flux']) & (self.records['sig'] >= 3.)
         self.selection = np.logical_and(self.selection, selection)
-        self.time_order = np.argsort(self.records[self.selection].field(self.timefield))
+        self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
         if len(np.where(self.selection)[0]) < len(self.ind):
             logger.info('Restricted to {} "good" {}s by also excluding nondetections'.format(
                 len(np.where(self.selection)[0]), self.entryname))
-        self.ind = np.where(self.selection)[0][self.time_order]
+        self.ind = np.where(self.selection)[0][self.order]
 
     def __str__(self):
         """
