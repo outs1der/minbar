@@ -21,7 +21,7 @@ setuptools.setup(
     install_requires=['numpy', 'pandas', 'astropy', 'scipy'],
     # see https://semver.org for guidelines
     # *strongly* suggested for sharing
-    version='1.6.0',
+    version='1.7.0',
     # The license can be anything you like
     license='GNU GPLv3',
     description='Python package for analysing observational data of thermonuclear (type-I) X-ray bursts observed by RXTE/PCA, BeppoSAX/WFC and INTEGRAL/JEM-X', 
