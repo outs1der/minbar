@@ -104,10 +104,12 @@ class IDLDatabase:
         self.records = Table(records)
 
         # Also strip out the trailing spaces in the various strings
+        # This is designed for the MINBAR databases, for which these columns are
+        # present; but we check here in case we're using for other databases
 
-        self.records['name'] = [x.strip() for x in self.records['name']]
-        self.records['obsid'] = [x.strip() for x in self.records['obsid']]
-        self.records['notes'] = [x.strip() for x in self.records['notes']]
+        for column in ['name','obsid','notes']:
+            if column in self.field_names:
+                self.records[column] = [x.strip() for x in self.records[column]]
 
 
     def create_format(self):
