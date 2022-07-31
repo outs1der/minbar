@@ -947,6 +947,13 @@ class Bursts(Minbar):
             assert _data.exp.values[-1] < _dt[-1] # check if our guess is wrong
             _data['dt'] = _dt
 
+        # We'd like to have some information about the data, so add that here
+        # This is apparently not the best way to do this necessarily, but we're left
+        # with little choice, as the DataFrame is the only thing returned:
+        # https://stackoverflow.com/questions/14688306/adding-meta-information-metadata-to-pandas-dataframe
+
+        _data.attrs.update({'file': _file})
+
         return _data
 
     def get_lc(self, id, pre=16., post=None):
