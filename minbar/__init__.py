@@ -1777,7 +1777,8 @@ class Instrument:
                  lightcurve=['lc1_3-25keV_1.0s.fits','lc2_3-25keV_1.0s.fits'],
                  source_name=None,
                  spectrum=None,
-                 verbose=False):
+                 verbose=False,
+                 effarea=None):
 
         self.name = name
         if name in MINBAR_INSTR_LABEL.keys():
@@ -1793,6 +1794,9 @@ class Instrument:
                 return None
             logger.warning('new instrument {} may not be fully implemented'.format(name))
             self.label = label
+            if effarea is None:
+                self.effarea = 100*u.cm**2
+                logger.warning('effective area not supplied, assuming {}'.format(self.effarea))
 
         if os.path.isdir('/'.join([MINBAR_ROOT, path])):
             self.path = path
