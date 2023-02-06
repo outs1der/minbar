@@ -48,7 +48,7 @@ DATE = datetime.now()
 # This is NOT the directory where the table data files are found
 # LOCAL_DATA flag is now determined dynamically as part of minbar.__init__
 
-MINBAR_ROOT = '/Users/Shared/burst/minbar'
+MINBAR_ROOT = '/home/burst/minbar'
 # LOCAL_DATA = True
 MINBAR_URL = 'https://burst.sci.monash.edu/'
 
@@ -1321,17 +1321,27 @@ class Observation:
         :return:
         """
         if self.time is None:
-            lc = self.get_lc()
+            self.get_lc()
+            if self.time is None:
+                return
 
         # plt.plot(lc['TIME'],lc['RATE'])
         # plot can't work with "raw" time units
         plt.plot(self.mjd.mjd, self.rate)
         plt.xlabel('Time (MJD '+self.mjd.scale.upper()+')')
         plt.ylabel('Rate (count s$^{-1}$ cm$^{-2}$)')
+
+        if hasattr(self, 'bursts'):
+            # also plot the bursts
+            rate_max = np.nanmax(self.rate)
+            rate_range = rate_max-np.nanmin(self.rate)
+            plt.plot(self.bursts['time'], 
+                rate_max+0.05*rate_range * np.full(len(self.bursts), 1), '^')
+
         plt.show()
 
 
-    def get_path(self):
+    def get_path(self, split=False):
         """
         Return the path for MINBAR observations, assuming you have them stored locally
         :param entry:
@@ -1339,16 +1349,40 @@ class Observation:
         """
 
         instr = self.instr.label
-        if self.instr.local_data:
-            _match = np.where(self.instr.source_name == self.name)[0]
-            # print (_match)
-            assert len(_match) == 1
-            # if len(_match) > 1:
-                # logger.warning("multiple source name matches for path")
-            if self.instr.has_dir[_match[0]]:
-                return '/'.join([MINBAR_ROOT, self.instr.path, 'data',
-                         self.instr.source_path[_match[0]],
-                         self.obsid])
+        if not self.instr.local_data:
+            logger.warning('no local data is present, check your MINBAR_ROOT')
+            return None
+
+        _match = np.where(self.instr.source_name == self.name)[0]
+        # print (_match)
+        assert len(_match) == 1
+        # if len(_match) > 1:
+            # logger.warning("multiple source name matches for path")
+        if self.instr.has_dir[_match[0]]:
+            # this only implies that there is a source directory for this
+            # object, NOT that the obs directory exists
+            path = '/'.join([MINBAR_ROOT, self.instr.path, 'data',
+                     self.instr.source_path[_match[0]],
+                     self.obsid])
+            if os.path.isdir(path):
+                # the "split" option is only relevant for PCA/XTE data
+                if (not split) or (instr != 'XP'):
+                    return path
+                else:
+                    # PCA data are sometimes split over multiple paths, so
+                    # try to find those here
+                    i, path_arr = 0, [path]
+                    while (os.path.isdir(path+str(i))): 
+                        path_arr.append(path+str(i))
+                        i +=1
+                    # if no additional directories are found, this routine will
+                    # still return a (single-element) list, but I think that's
+                    # OK
+                    return path_arr
+            else:
+                logger.warning('directory {} not found locally'.format(path))
+                return None
+  
 
         return None
 
@@ -1361,42 +1395,99 @@ class Observation:
         :return:
         """
 
+        def pca_time_to_mjd_tt(time, header):
+            """
+            convert raw times to MJD (TT) here; see https://heasarc.gsfc.nasa.gov/docs/xte/abc/time_tutorial.html
+            can check results using https://heasarc.gsfc.nasa.gov/cgi-bin/Tools/xTime
+            """
+
+            return Time( time.to('d') + (header['MJDREFI'] + header['MJDREFF'])*u.d, format='mjd', scale='tt') # TT
+
+        def read_fits_lc(file, effarea = 1.*u.cm**2):
+            """
+            Utility routine to read in the important bits of a lightcurve
+            """
+
+            # print (path+'/'+filename)
+            lcfile = fits.open(file)
+
+            # For XTE files, convention is to have the first extension RATE and a second extension STDGTI
+            header = lcfile[0].header
+            lc = lcfile[1].data
+
+            gti_ext = lcfile[2].data
+
+            lcfile.close()
+
+            # Can clean up the table here if necessary; i.e. create a Lightcurve
+            # object (not yet defined), adopt uniform time scale etc.
+            # Using astropy to keep track of the time scale and units, read from the
+            # header file; see https://docs.astropy.org/en/stable/time
+
+            timesys = header['TIMESYS']
+            timeunit = header['TIMEUNIT']
+            time = lc['TIME']*u.Unit(timeunit)
+
+            rate = lc['RATE']/u.s/effarea
+            error = lc['ERROR']/u.s/effarea
+
+            # print (header['INSTRUME'])
+            if header['INSTRUME'] == 'PCA':
+
+                mjd_tt = pca_time_to_mjd_tt(time, header)
+                mjd = mjd_tt.utc
+
+                # not sure if GTI arrays exist for other instruments
+                gti = np.array([])
+                for _gti in gti_ext:
+                    gti = np.append(gti, _gti)#, axis=1)
+
+            return time, rate, error, timesys, timeunit, mjd, pca_time_to_mjd_tt(gti*u.Unit(timeunit), header).utc
+
         path = self.get_path()
+        if path is None:
+            # indicates no local data present, so skip the read
+            return None
+
+        add_files = []
         if self.instr.label == 'XP':
+            # The XTE path uses a function to get the lightcurve name
             filename = self.instr.lightcurve(self.obsid)
+            logger.warning('PCA lightcurves are standard products which may not show all bursts')
+
+            # there is also the possibility of additional paths, where the
+            # observation data is split over
+            add_paths = self.get_path(split=True)[1:]
+            for _path in add_paths:
+                add_files.append(self.instr.lightcurve(self.obsid+_path[-1:]))
+            # print (add_paths, add_files)
         else:
             # logger.warning("other instruments not yet implemented")
             filename = self.instr.lightcurve
 
-        # print (path+'/'+filename)
-        lcfile = fits.open(path+'/'+filename)
+        self.file = '/'.join((path, filename))
+        self.time, self.rate, self.error, self.timesys, self.timeunit, self.mjd, self.gti = read_fits_lc(self.file, self.instr.effarea)
 
-        # For XTE files, convention is to have the first extension RATE and a second extension STDGTI
-        header = lcfile[0].header
-        lc = lcfile[1].data
+        for i, file in enumerate(add_files):
+            # here we read in any additional files and append them to the already-created arrays
+            _time, _rate, _error, _timesys, _timeunit, _mjd, _gti = read_fits_lc('/'.join((add_paths[i], file)), self.instr.effarea)
+            self.file = np.append(self.file, '/'.join((add_paths[i], file)))
+            # The ordering here will not necessarily be in time
+            self.time = _time.insert(0, self.time)
+            self.rate = _rate.insert(0, self.rate)
+            self.error = _error.insert(0, self.error)
+            self.mjd = _mjd.insert(0, self.mjd)
+            assert _timeunit == self.timeunit
+            assert _timesys == self.timesys
+            self.gti = _gti.insert(0, self.gti)
+        self.gti = np.reshape(self.gti.sort(), (-1,2))
+        i = self.time.argsort()
+        self.time = self.time[i]
+        self.rate = self.rate[i]
+        self.error = self.error[i]
+        self.mjd = self.mjd[i]
 
-        lcfile.close()
-
-        # Can clean up the table here if necessary; i.e. create a Lightcurve
-        # object (not yet defined), adopt uniform time scale etc.
-        # Using astropy to keep track of the time scale and units, read from the
-        # header file; see https://docs.astropy.org/en/stable/time
-
-        self.timesys = header['TIMESYS']
-        self.timeunit = header['TIMEUNIT']
-        self.time = lc['TIME']*u.Unit(self.timeunit)
-
-        effarea = 1.*u.cm**2    # dummy value
-        if self.instr.name == 'PCA':
-            # convert raw times to MJD (TT) here; see https://heasarc.gsfc.nasa.gov/docs/xte/abc/time_tutorial.html
-            # can check results using https://heasarc.gsfc.nasa.gov/cgi-bin/Tools/xTime
-            self.mjd_tt = Time( self.time.to('d') + (header['MJDREFI'] + header['MJDREFF'])*u.d, format='mjd', scale='tt') # TT
-            self.mjd = self.mjd_tt.utc
-
-        self.rate = lc['RATE']/u.s/self.instr.effarea
-        self.error = lc['ERROR']/u.s/self.instr.effarea
-
-        return lc
+        return #lc
 
 
 class Sources:
