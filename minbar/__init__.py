@@ -1315,30 +1315,52 @@ class Observation:
         return output
 
 
-    def plot(self):
+    def plot(self, figure=None, show=True, show_bursts=True, sym_burst='^r',
+            **kwargs):
         """
-        Plot the lightcurve, reading it in first if need be
-        :return:
+        Plot the observation lightcurve, reading it in first if need be.
+        Keyword arguments are passed on to the plot command (see the example
+        below).
+        :param figure: existing figure to add to, if multiple observations are
+          to be plotted on the same axis (for example)
+        :param show: display the figure immediately or not (latter case for 
+          multiple observations to be plotted together)
+        :return: plot object
+
+        Example usage, showing a combined plot of two subsequent observations
+        from 4U 1254-69:
+
+        obs1=mb.Observation(o[17920])
+        obs2=mb.Observation(o[17921], color='C0')
+        fig = obs1.plot(show=False)
+        obs2.plot(fig)
+
         """
         if self.time is None:
             self.get_lc()
             if self.time is None:
                 return
 
+        if figure is None:
+            figure = plt.figure()
+
         # plt.plot(lc['TIME'],lc['RATE'])
         # plot can't work with "raw" time units
-        plt.plot(self.mjd.mjd, self.rate)
+        plt.plot(self.mjd.mjd, self.rate, **kwargs)
         plt.xlabel('Time (MJD '+self.mjd.scale.upper()+')')
         plt.ylabel('Rate (count s$^{-1}$ cm$^{-2}$)')
 
-        if hasattr(self, 'bursts'):
+        if hasattr(self, 'bursts') & show_bursts:
             # also plot the bursts
             rate_max = np.nanmax(self.rate)
             rate_range = rate_max-np.nanmin(self.rate)
             plt.plot(self.bursts['time'], 
-                rate_max+0.05*rate_range * np.full(len(self.bursts), 1), '^')
+                rate_max+0.05*rate_range * np.full(len(self.bursts), 1), sym_burst)
 
-        plt.show()
+        if show:
+            plt.show()
+
+        return figure
 
 
     def get_path(self, split=False):
