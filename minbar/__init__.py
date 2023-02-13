@@ -1264,13 +1264,16 @@ class Observation:
             # print (label)
 
             # Don't set these parameters yet, as they'll be defined outside this block
-            instr = Instrument(label)
+            instr = Instrument(label, obs_entry['instr'])
             name = obs_entry['name']
             obsid = obs_entry['obsid']
 
             # self.tstart = obs_entry['tstart']
             # self.tstop = obs_entry['tstop']
-            # Copy all the columns to the new object
+            # Copy all the columns to the new object. NOTE this will includ
+            # the instrument label, which will be overwritten with the 
+            # instrument object, below; but we keep the label by specifying it
+            # as a configuration/camera above
             for col in obs_entry.columns:
                 if col in UNITS.keys():
                     setattr(self, col, obs_entry[col]*UNITS[col])
@@ -1346,6 +1349,8 @@ class Observation:
 
         # plt.plot(lc['TIME'],lc['RATE'])
         # plot can't work with "raw" time units
+        # the duplication of .mjd is not a typo below! Also the scale method
+        # is for Time objects, which mjd should be defined as
         plt.plot(self.mjd.mjd, self.rate, **kwargs)
         plt.xlabel('Time (MJD '+self.mjd.scale.upper()+')')
         plt.ylabel('Rate (count s$^{-1}$ cm$^{-2}$)')
@@ -1380,7 +1385,12 @@ class Observation:
         assert len(_match) == 1
         # if len(_match) > 1:
             # logger.warning("multiple source name matches for path")
-        if self.instr.has_dir[_match[0]]:
+        if self.instr.label == 'SW':
+            # WFC doesn't have individual directories for sources
+            path = '/'.join([MINBAR_ROOT, self.instr.path, 'data'])
+            if os.path.isdir(path):
+                return path
+        elif self.instr.has_dir[_match[0]]:
             # this only implies that there is a source directory for this
             # object, NOT that the obs directory exists
             path = '/'.join([MINBAR_ROOT, self.instr.path, 'data',
@@ -1435,9 +1445,15 @@ class Observation:
 
             # For XTE files, convention is to have the first extension RATE and a second extension STDGTI
             header = lcfile[0].header
+            instrument = header['INSTRUME']
+            if instrument != 'PCA':
+                # For WFC, TIMESYS etc. are in the first extension header
+                header = lcfile[1].header
             lc = lcfile[1].data
 
-            gti_ext = lcfile[2].data
+            gti_ext = None
+            if len(lcfile) > 2:
+                gti_ext = lcfile[2].data
 
             lcfile.close()
 
@@ -1449,12 +1465,14 @@ class Observation:
             timesys = header['TIMESYS']
             timeunit = header['TIMEUNIT']
             time = lc['TIME']*u.Unit(timeunit)
+            if timesys == 'MJD':
+                mjd = Time( time, format='mjd', scale='utc')
 
             rate = lc['RATE']/u.s/effarea
             error = lc['ERROR']/u.s/effarea
 
             # print (header['INSTRUME'])
-            if header['INSTRUME'] == 'PCA':
+            if instrument == 'PCA':
 
                 mjd_tt = pca_time_to_mjd_tt(time, header)
                 mjd = mjd_tt.utc
@@ -1464,7 +1482,9 @@ class Observation:
                 for _gti in gti_ext:
                     gti = np.append(gti, _gti)#, axis=1)
 
-            return time, rate, error, timesys, timeunit, mjd, pca_time_to_mjd_tt(gti*u.Unit(timeunit), header).utc
+                return time, rate, error, timesys, timeunit, mjd, pca_time_to_mjd_tt(gti*u.Unit(timeunit), header).utc
+            else:
+                return time, rate, error, timesys, timeunit, mjd, None
 
         path = self.get_path()
         if path is None:
@@ -1483,6 +1503,11 @@ class Observation:
             for _path in add_paths:
                 add_files.append(self.instr.lightcurve(self.obsid+_path[-1:]))
             # print (add_paths, add_files)
+        elif self.instr.label == 'SW':
+            # WFC also uses a (different) function to get the name
+            # also have to translate to the name set used in the filenames
+            __name = self.instr.source_path[np.where(self.instr.source_name == self.name)[0]][0]
+            filename = self.instr.lightcurve(__name, self.obsid, self.instr.instr[2:])
         else:
             # logger.warning("other instruments not yet implemented")
             filename = self.instr.lightcurve
@@ -1501,8 +1526,10 @@ class Observation:
             self.mjd = _mjd.insert(0, self.mjd)
             assert _timeunit == self.timeunit
             assert _timesys == self.timesys
-            self.gti = _gti.insert(0, self.gti)
-        self.gti = np.reshape(self.gti.sort(), (-1,2))
+            if _gti is not None:
+                self.gti = _gti.insert(0, self.gti)
+        if self.gti is not None:
+            self.gti = np.reshape(self.gti.sort(), (-1,2))
         i = self.time.argsort()
         self.time = self.time[i]
         self.rate = self.rate[i]
@@ -1886,7 +1913,7 @@ class Instrument:
     jemx = minbar.Instrument('JEM-X', 'jemx', 'IJ')
     """
 
-    def __init__(self, name, path=None, label=None,
+    def __init__(self, name, camera=None, path=None, label=None,
                  lightcurve=['lc1_3-25keV_1.0s.fits','lc2_3-25keV_1.0s.fits'],
                  source_name=None,
                  spectrum=None,
@@ -1897,6 +1924,7 @@ class Instrument:
         if name in MINBAR_INSTR_LABEL.keys():
             # These are the known MINBAR instruments
             self.label = MINBAR_INSTR_LABEL[name]
+            self.instr = camera # copy of the instr row
             if path is None:
                 path = MINBAR_INSTR_PATH[self.label]
 
@@ -1953,9 +1981,105 @@ class Instrument:
             self.effarea_bursts = JEMX_EFFAREA_BURSTS
 
         if self.label == 'SW':
+
             # BeppoSAX/WFC
+	    # list of WFC source file names here. There are many more names
+	    # than the bursters
+            self.wfc_lightcurve_source_name = ['1RXHJ173523.7-354013',
+             '1RXSJ180408.9-342058', 'AXJ1745.6-2901', 'AXJ1754.2-2754',
+             'HETEJ1900.12455', 'IGRJ17062-6143', 'IGRJ17191-2821',
+             'IGRJ17254-3257', 'IGRJ17380-3749', 'IGRJ17464-2811',
+             'IGRJ17498-2921', 'IGRJ17511-3057', 'ks1724-35', 'M28',
+             'MAXIJ1647-227', 'RXJ1718.4-4029', 'RXSJ170854-3219',
+             'SAXJ1324.5-6313', 'SAXJ1603.9-7753', 'SAXJ1712.6-3739',
+             'SAXJ1747.0-2853', 'SAXJ1748.9-2021', 'SAXJ1750.8-2900',
+             'SAXJ1752.4-3138', 'SAXJ1753.5-2349', 'SAXJ1806.5-2215',
+             'SAXJ1808.4-3658', 'SAXJ1810.8-2609', 'SAXJ1818.6-1703',
+             'SAXJ1818.7+1424', 'SAXJ1828.5-1037', 'SAXJ2103.5+4545',
+             'SAX J2224.9+5421', 'SAXJ2224.9+5421', 'SWIFTJ1749.4-2807',
+             'SWIFTJ185003.2-005627', 'SWIFTJ1922.7-1716', 'Terzan5',
+             'UWCrb', 'velapulsa', 'velax1', 'X0025+641', 'X0042+327',
+             'X0050-727', 'X0052-739', 'X0053+604', 'X0103-720', 'X0103-762',
+             'X0104-720', 'X0114+650', 'X0115+634', 'X0115-737', 'X0116-737',
+             'X0142+614', 'X0143+611', 'X0240+611', 'X0352+309', 'X0422+328',
+             'X0449-055', 'X0512-401', 'X0521-720', 'X0522-696', 'X0527-328',
+             'X0531+219', 'X0531-661', 'X0532-664', 'X0535-668', 'X0535-692',
+             'X0538-641', 'X0540-693', 'X0540-697', 'X0543-682', 'X0544-665',
+             'X0547-711', 'X0614+091', 'X0656-072', 'X0726-260', 'X0746-532',
+             'X0748-676', 'X0755-609', 'X0812-311', 'X0818-52', 'X0821-42',
+             'X0834-430', 'X0836-429', 'X0918-549', 'X0921-630', 'X1008-570',
+             'X1010-584', 'X1011-447', 'X1024-575', 'X1028-567', 'X1037-564',
+             'X1037-592', 'X1048-596', 'X1059-771', 'X1118-616', 'X1119-603',
+             'X1124-684', 'X1137-651', 'X1145-616', 'X1145-619', 'X1148-665',
+             'X1223-624', 'X1235-751', 'X1239-599', 'X1244-603', 'X1246-588',
+             'X1248-411', 'X1249-289', 'X1249-637', 'X1251-568', 'X1254-690',
+             'X1258-613', 'X1259-600', 'X1322-427', 'X1323-618', 'X1344-326',
+             'X1344-603', 'X1354-644', 'X1414+250', 'X1417-624', 'X1455-314',
+             'X1516-569', 'X1524-617', 'X1538-522', 'x1543-475', 'X1543-624',
+             'X1544-475', 'X1550-552', 'X1550-564', 'X1553-542', 'X1556-605',
+             'X1608-522', 'X1617-155', 'X1624-375', 'X1624-490', 'X1627-673',
+             'X1630-472', 'X1632-497', 'X1633-170', 'X1636-536', 'X1642-455',
+             'X1644+500', 'X1652+390', 'X1655-400', 'X1656+354', 'X1657-415',
+             'X1658-298', 'X1659-487', 'X1700-377', 'X1702-363', 'X1702-429',
+             'X1704+240', 'X1705-440', 'X1706-266', 'X1708-233', 'X1708-407',
+             'X1711-339', 'X1715-321', 'X1716-249', 'X1722-363', 'X1724-307',
+             'X1727-214', 'X1728-169', 'X1728-247', 'X1728-337', 'X1728-338',
+             'X1730-220', 'X1730-311', 'X1730-333', 'X1731-260', 'X1732-300',
+             'X1732-304', 'X1734-275', 'X1734-292', 'X1735-269', 'X1735-28',
+             'X1735-444', 'X1736-297', 'X1736-310', 'X1737-132', 'X1737-282',
+             'X1739-277', 'X1741-286', 'X1741-289', 'X1741-293', 'X1741-297',
+             'X1741-322', 'X1742-289', 'X1742-290', 'X1742-294', 'X1742-295',
+             'X1742-326', 'X1743-287', 'X1743-288', 'X1743-290', 'X1743-322',
+             'X1744-265', 'X1744-28', 'X1744-299', 'X1744-300', 'X1744-361',
+             'X1745-203', 'X1745-24', 'X1745-248', 'X1746-324', 'X1746-370',
+             'X1747-214', 'X1747-299', 'X1747-312', 'X1747-341', 'X1749-285',
+             'X1750-248', 'X1750-27', 'X1754-32', 'X1755-338', 'X1758-205',
+             'X1758-25', 'X1758-250', 'X1758-258', 'X1803-245', 'X1805-204',
+             'X1806-202', 'X1807-10', 'X1811-171', 'X1812-12', 'X1813-140',
+             'X1814+498', 'X1820-303', 'X1822-000', 'X1822-371', 'X1826-235',
+             'X1832-330', 'X1833-103', 'X1837+049', 'X1839-06', 'X1843+00',
+             'X1845-024', 'X1845-03', 'X1846-031', 'X1850-087', 'X1851-034',
+             'X1851-312', 'X1854+052', 'X1905+000', 'X1907+097', 'X1908+005',
+             'X1908+075', 'X1909+048', 'X1915+105', 'X1916-053', 'X1918-32',
+             'X1942+274', 'X1947+300', 'X1949+32', 'x1953+319', 'X1956+350',
+             'X1957+115', 'X2017-01', 'X2023+338', 'X2030+3', 'X2030+375',
+             'X2030+407', 'X2057+3', 'X2058+42', 'X2100+41', 'X2127+119',
+             'X2127+1191', 'X2129+470', 'X2138+567', 'X2140+433',
+             'X2142+380', 'X2159+499', 'X2206+542', 'X2215-086', 'X2250+165',
+             'X2252-034', 'X2259+587', 'X2323+585', 'XMMJ174457-2850.3',
+             'XTEJ1701-407', 'XTEJ1701-462', 'XTEJ1709-267', 'XTEJ1710-281',
+             'XTEJ1723-056', 'XTEJ1723-376', 'XTEJ1739-285', 'XTEJ1747-274',
+             'XTEJ1759-221', 'XTEJ1810-189', 'XTEJ1814-338', 'XTEJ2123-058']
+
+            self.nmatched = 0
+            for i, name in enumerate(self.source_path):
+
+                if not (name in self.wfc_lightcurve_source_name):
+                    # if we can't find a match, we might need to modify a bit
+                    alt = name.replace('4U','X')
+
+                    if (alt in self.wfc_lightcurve_source_name):
+                        self.source_path[i] = alt
+                        self.nmatched += 1
+                    else:
+                        # 2nd last try, in case file version has an extra digit
+                        imatch = [j for j, x in enumerate(self.wfc_lightcurve_source_name) if alt == x[:len(alt)]]
+                        if imatch == []:
+                            # absolutely last try, in case source version has
+                            # an extra digit
+                            imatch = [j for j, x in enumerate(self.wfc_lightcurve_source_name) if alt.ljust(len(x),'0') == x]
+                        if imatch != []:
+                            self.source_path[i] = self.wfc_lightcurve_source_name[imatch[0]]
+                            self.nmatched += 1
+                else:
+                    self.nmatched += 1
+            # above code matches 51/115 sources
+            if self.nmatched < len(self.source_path):
+                logger.warning('only got matched source path names for {}/{} sources'.format(self.nmatched, len(self.source_path)))
+            lightcurve = self.wfc_lightcurve_filename
             # Lightcurves are already normalised
             self.effarea = 1.*u.cm**2
+            self.effarea_bursts = 1.*u.cm**2 # I think this is correct! - dkg
 
         # Check that the directories in the data path all correspond to source_paths
         # You don't want to miss observations in some directory because of inconsistencies
@@ -1963,6 +2087,9 @@ class Instrument:
 
         self.has_dir, self.nonmatched, self.nmissing = verify_path(
             self.source_name, self.path, self.source_path, verbose=verbose)
+        if self.label == 'SW':
+            # special here for WFC as we don't have source subdirectories
+            self.has_dir = os.path.isdir('/'.join([MINBAR_ROOT, path]))
 
         # as for MINBAR
 
@@ -1978,6 +2105,7 @@ class Instrument:
     def __str__(self):
         """
         Method to display information about this object
+        TODO: add PCU decode function to show active PCUs
         :return:
         """
 
@@ -1985,9 +2113,10 @@ class Instrument:
 MINBAR instrument definition
 
 Name: {} ({})
-Data path: {}
+Camera/detector flag: {}
+Data path: {}/{}/data
 Lightcurve(s): {}
-Spectra: {}""".format(self.name, self.label, self.path, self.lightcurve, self.spectrum)
+Spectra: {}""".format(self.name, self.label, self.instr[2:], MINBAR_ROOT, self.path, self.lightcurve, self.spectrum)
 
 
     def filename_with_obsid(self, template, obsid, exclude=None):
@@ -2016,6 +2145,16 @@ Spectra: {}""".format(self.name, self.label, self.path, self.lightcurve, self.sp
 
         # return 'stdprod/xp{}_n1.lc.gz'.format(obsid.replace("-", ""))
         return self.filename_with_obsid('stdprod/xp{}_n1.lc.gz', obsid, "-")
+
+
+    def wfc_lightcurve_filename(self, name, obsid, camera):
+        """
+        Function to return the lightcurve name for WFC observations
+        This convention is for the 2013 data
+        :return:
+        """
+
+        return '{}_{}w{}_e1_31.lcv'.format(name, obsid, camera)
 
 
     def analyse_persistent(self, src, obsid):
