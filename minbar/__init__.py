@@ -393,7 +393,7 @@ class Minbar(IDLDatabase):
         Return an index array selecting the specified burst type (self.type).
         """
         if self.type == None:
-            return np.ones(len(self.records), np.bool)
+            return np.ones(len(self.records), bool)
         else:
             return self.records.field('type') == self.type
 
@@ -621,7 +621,7 @@ class Minbar(IDLDatabase):
             # Array argument
             if type(field[0]) == str:
                 return self.get(field)
-            elif (type(field[0]) == bool) or (type(field[0]) == np.bool_) or (type(field) == np.ma.core.MaskedArray):
+            elif (type(field[0]) == bool) or (type(field[0]) == bool) or (type(field) == np.ma.core.MaskedArray):
                 # Boolean argument
                 return self.get_records()[field]
             elif np.issubdtype(type(field[0]), np.integer):
