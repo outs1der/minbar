@@ -1,5 +1,5 @@
 astropy==5.2.1
-certifi @ file:///croot/certifi_1671487769961/work/certifi
+# certifi @ file:///croot/certifi_1671487769961/work/certifi
 contourpy==1.0.7
 cycler==0.11.0
 fonttools==4.38.0

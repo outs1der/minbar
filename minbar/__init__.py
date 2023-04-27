@@ -621,7 +621,7 @@ class Minbar(IDLDatabase):
             # Array argument
             if type(field[0]) == str:
                 return self.get(field)
-            elif (type(field[0]) == bool) or (type(field[0]) == bool) or (type(field) == np.ma.core.MaskedArray):
+            elif (type(field[0]) == bool) or (type(field[0]) == bool) or (type(field) == np.ma.core.MaskedArray) or (type(field[0]) == np.bool_):
                 # Boolean argument
                 return self.get_records()[field]
             elif np.issubdtype(type(field[0]), np.integer):
