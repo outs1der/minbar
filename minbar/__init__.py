@@ -17,9 +17,14 @@ https://iopscience.iop.org/article/10.3847/1538-4365/ab9f2e
 
 (c) 2020, Duncan Galloway duncan.galloway@monash.edu & Laurens Keek,
   laurens@xrb.space
+
 Updated for MINBAR DR1, 2020, Duncan Galloway, duncan.galloway@monash.edu
 Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 """
+
+__author__ = """Laurens Keek and Duncan Galloway"""
+__email__ = 'duncan.galloway@monash.edu'
+__version__ = '1.14.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -163,6 +168,14 @@ UCXBS = ['4U 0513-40', '4U 0614+09', '2S 0918-549', '4U 1246-588',
            'XMMU J181227.8-181234', '4U 1812-12', '4U 1820-303',
            'XB 1832-330', '4U 1850-086', 'XB 1905+000', 'XB 1916-053',
            'M15 X-2']
+
+# Set up for publication-quality plots
+
+plt.rcParams.update({
+    "text.usetex": True,
+    "font.family": "Times"
+})
+
 
 def create_logger():
     """
@@ -1230,6 +1243,100 @@ class Observations(Minbar):
         return "Multi-INstrument oBservation ARchive (MINBAR) ({} {}s from {} sources)".format(
             len(self.records), self.entryname, len(self.names))
 
+    def plot(self, bursts=True, entry=None, lightcurve=None, **kwargs):
+        """
+        Simple plotting interface for MINBAR observations, useful for
+        producing (for example) summary plots of source behaviour over the
+        MINBAR sample
+
+        This routine works off the fluxes in the current selection, which
+        could include multiple sources (no current method to plot for >1
+        sources)
+
+        :param bursts: boolean flag to toggle plotting of bursts
+        :param entry: alternative selection method, by just passing an
+          array of the observation ID numbers
+        :param lightcurve: boolean to trigger plotting of the high-time
+          resolution lightcurves. By default, this will plot the
+          lightcurves if there are less than 10 observations or they cover
+          10d or less
+
+        Example usage:
+        import minbar
+        o = minbar.Observations()
+        o.select('4U 1636-536')
+        o.select(0,'flux',exclude=True) # don't plot zero fluxes
+        o.plot()
+        """
+
+        if (entry is not None):
+            sel_old = self.selection # store to preserve the selection
+            self.clear()
+            self.select(entry, 'entry')
+
+        if (len(set(self['name'])) > 1):
+            logger.warning('multiple sources in current selection, can\'t plot')
+            return
+        src = self['name'][0]
+
+        fig = plt.figure()
+
+        extent = max(self['tstop'])-min(self['tstart'])
+        if lightcurve is None:
+            lightcurve = self.local_data & ((len(self['entry']) <= 10) | (extent <= 10.))
+
+        instr = np.array([x[:2] for x in self['instr']])
+        label = {'IJ': '{\it INTEGRAL}/JEM-X', 'SW': '{\it BeppoSAX}/WFC',
+            'XP': '{\it RXTE}/PCA'}
+        colors = {'IJ': 'C0', 'SW': 'C1', 'XP': 'C2'}
+
+        for _instr in set(instr):
+            _s = instr == _instr
+            if lightcurve:
+                # plot individual high-time resolution lightcurves
+                # not yet tested
+                for _id in self['entry'][_s]:
+                    _obs = Observation(self[_id])
+                    _obs.plot(fig, show=False)
+            else:
+                # just plot the averaged fluxes over the entire observation
+                plt.errorbar(0.5*(self['tstart'][_s]+self['tstop'][_s]),
+                    self['flux'][_s], yerr = self['e_flux'][_s],
+                    xerr = 0.5*(self['tstop'][_s]-self['tstart'][_s]),
+                    fmt='.', label=label[_instr], color=colors[_instr])
+
+        # need a reverse lookup for the bursts; this is pretty slow, but I
+        # can't think of a better way to do it
+        # Actually this is already implemented in select!
+
+        if bursts:
+            self.bursts.clear()
+            self.bursts.select(self['entry'], 'entry_obs')
+
+            nburst = len(self.bursts['time'])
+            if nburst > 0:
+                burst_pos = max(self['flux']+self['e_flux'])*1.05 \
+                    - 0.05*min(self['flux']-self['e_flux'])
+                plt.plot(self.bursts['time'],
+                    np.full(len(self.bursts['time']), burst_pos),'|r',
+                    label='type-I bursts')
+            else:
+                logger.info('no bursts to show in current selection')
+            self.bursts.clear()
+
+        plt.xlabel('Time [MJD]')
+        plt.ylabel('Flux [3-25 keV, $10^{-9}\, \mathrm{erg\,cm^{-2}\,s^{-1}}$]')
+        if (nburst > 0) | (len(set(instr)) > 1):
+            plt.legend()
+
+        plt.show()
+
+        if entry is not None:
+            # restore the original selection
+            self.selection = sel_old
+
+        return fig
+
 
 class Observation:
     """
@@ -1310,7 +1417,7 @@ class Observation:
         output = "MINBAR observation of {}\nInstrument: {}\nObsID: {}".format(
             self.name, self.instr.name, self.obsid)
         if hasattr(self,'tstart') & hasattr(self,'tstop'):
-            output += "\nTime range: {}-{}".format(self.tstart, self.tstop)
+            output += "\nTime range: MJD {}-{}".format(self.tstart.value, self.tstop)
         _path = self.get_path()
         if _path is not None:
             output += "\nData path: {}".format(_path)
@@ -1339,29 +1446,42 @@ class Observation:
         obs2.plot(fig)
 
         """
+        ylabel = 'Rate (count s$^{-1}$ cm$^{-2}$)'
+
         if self.time is None:
             self.get_lc()
-            if self.time is None:
-                return
 
         if figure is None:
             figure = plt.figure()
 
-        # plt.plot(lc['TIME'],lc['RATE'])
-        # plot can't work with "raw" time units
-        # the duplication of .mjd is not a typo below! Also the scale method
-        # is for Time objects, which mjd should be defined as
-        plt.plot(self.mjd.mjd, self.rate, **kwargs)
-        plt.xlabel('Time (MJD '+self.mjd.scale.upper()+')')
-        plt.ylabel('Rate (count s$^{-1}$ cm$^{-2}$)')
+        if self.time is None:
+            logger.info('Showing schematic plot for flux')
+            ylabel = 'Flux (3-25 keV, $10^{-9}\ \rm{erg\,cm^{-2}\,s^{-1}$)'
+            plt.errorbar(0.5*(self.tstart+self.tstop), self.flux, 
+                xerr=0.5*(self.tstop-self.tstart), yerr=self.e_flux, **kwargs)
+            rate_max = (self.flux+self.e_flux).value
+            rate_range = rate_max
+            plt.ylim((0,rate_max+rate_range*0.1))
+            tscale = ''
+
+        else:
+            # plt.plot(lc['TIME'],lc['RATE'])
+            # plot can't work with "raw" time units
+            # the duplication of .mjd is not a typo below! Also the scale method
+            # is for Time objects, which mjd should be defined as
+            plt.plot(self.mjd.mjd, self.rate, **kwargs)
+
+            rate_max = np.nanmax(self.rate)
+            rate_range = rate_max-np.nanmin(self.rate)
+            tscale = self.mjd.scale.upper()
+
+        plt.xlabel('Time (MJD '+tscale+')')
+        # plt.ylabel(ylabel)
 
         if hasattr(self, 'bursts') & show_bursts:
             # also plot the bursts
-            rate_max = np.nanmax(self.rate)
-            rate_range = rate_max-np.nanmin(self.rate)
             plt.plot(self.bursts['time'], 
                 rate_max+0.05*rate_range * np.full(len(self.bursts), 1), sym_burst)
-
         if show:
             plt.show()
 
