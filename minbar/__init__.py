@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.14.0'
+__version__ = '1.14.1'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -1267,12 +1267,21 @@ class Observations(Minbar):
         o.select('4U 1636-536')
         o.select(0,'flux',exclude=True) # don't plot zero fluxes
         o.plot()
+
+        # or alternatively, for individual observations
+        o.plot(entry=[14637,14639])
         """
 
+        yrange = (1e10, 0.)
         if (entry is not None):
             sel_old = self.selection # store to preserve the selection
             self.clear()
             self.select(entry, 'entry')
+        else:
+            # if we're just doing the standard flux plot here, set the 
+            # data range used for calculating the position of the burst symbols
+            yrange = (min(self['flux']-self['e_flux']), 
+                max(self['flux']+self['e_flux']))
 
         if (len(set(self['name'])) > 1):
             logger.warning('multiple sources in current selection, can\'t plot')
@@ -1295,9 +1304,16 @@ class Observations(Minbar):
             if lightcurve:
                 # plot individual high-time resolution lightcurves
                 # not yet tested
+                _label = label[_instr]
                 for _id in self['entry'][_s]:
                     _obs = Observation(self[_id])
-                    _obs.plot(fig, show=False)
+                    _obs.plot(fig, show=False, show_bursts=False, 
+                        label=_label, color=colors[_instr])
+                    # have to calculate the yrange progressively here with
+                    # each lightcurve
+                    yrange = (min([yrange[0], min(_obs.rate.value)]),
+                        max([yrange[1], max(_obs.rate.value)]))
+                    _label = None
             else:
                 # just plot the averaged fluxes over the entire observation
                 plt.errorbar(0.5*(self['tstart'][_s]+self['tstop'][_s]),
@@ -1315,8 +1331,7 @@ class Observations(Minbar):
 
             nburst = len(self.bursts['time'])
             if nburst > 0:
-                burst_pos = max(self['flux']+self['e_flux'])*1.05 \
-                    - 0.05*min(self['flux']-self['e_flux'])
+                burst_pos = yrange[1]*1.05 - 0.05*yrange[0]
                 plt.plot(self.bursts['time'],
                     np.full(len(self.bursts['time']), burst_pos),'|r',
                     label='type-I bursts')
