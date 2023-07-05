@@ -1272,15 +1272,14 @@ class Observations(Minbar):
         o.plot(entry=[14637,14639])
         """
 
-        yrange = (1e10, 0.)
         if (entry is not None):
             sel_old = self.selection # store to preserve the selection
             self.clear()
             self.select(entry, 'entry')
-        else:
-            # if we're just doing the standard flux plot here, set the 
-            # data range used for calculating the position of the burst symbols
-            yrange = (min(self['flux']-self['e_flux']), 
+
+        # by default, we adopt the flux range for the table data; if we're
+        # reading in lightcurves later on this may be modified
+        yrange = (min(self['flux']-self['e_flux']), 
                 max(self['flux']+self['e_flux']))
 
         if (len(set(self['name'])) > 1):
