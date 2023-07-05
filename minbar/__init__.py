@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.14.1'
+__version__ = '1.14.2'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -1573,6 +1573,12 @@ class Observation:
         def read_fits_lc(file, effarea = 1.*u.cm**2):
             """
             Utility routine to read in the important bits of a lightcurve
+
+            :param file: name of file to read in
+            :param effarea: effective area adopted to convert count rate to
+              counts/cm^2/s (standard for MINBAR lightcurves)
+
+            :return: time, rate, error, timesys, timeunit, mjd, gti
             """
 
             # print (path+'/'+filename)
@@ -1580,10 +1586,10 @@ class Observation:
 
             # For XTE files, convention is to have the first extension RATE and a second extension STDGTI
             header = lcfile[0].header
-            instrument = header['INSTRUME']
-            if instrument != 'PCA':
+            if 'INSTRUME' not in header:
                 # For WFC, TIMESYS etc. are in the first extension header
                 header = lcfile[1].header
+            instrument = header['INSTRUME']
             lc = lcfile[1].data
 
             gti_ext = None
@@ -1600,8 +1606,6 @@ class Observation:
             timesys = header['TIMESYS']
             timeunit = header['TIMEUNIT']
             time = lc['TIME']*u.Unit(timeunit)
-            if timesys == 'MJD':
-                mjd = Time( time, format='mjd', scale='utc')
 
             rate = lc['RATE']/u.s/effarea
             error = lc['ERROR']/u.s/effarea
@@ -1619,6 +1623,12 @@ class Observation:
 
                 return time, rate, error, timesys, timeunit, mjd, pca_time_to_mjd_tt(gti*u.Unit(timeunit), header).utc
             else:
+                if 'MJDREF' in header:
+                    time += header['MJDREF']*u.d
+                mjd = Time( time, format='mjd', scale=timesys.lower())
+                if timesys == 'TT':
+                    mjd = mjd.utc
+
                 return time, rate, error, timesys, timeunit, mjd, None
 
         path = self.get_path()
@@ -1643,6 +1653,10 @@ class Observation:
             # also have to translate to the name set used in the filenames
             __name = self.instr.source_path[np.where(self.instr.source_name == self.name)[0]][0]
             filename = self.instr.lightcurve(__name, self.obsid, self.instr.instr[2:])
+        elif self.instr.label == 'IJ':
+            # JEM-X can have multiple lightcurves, but that's not implemented
+            # yet. Instead we pick one of them for the JEM-X1 or -X2 here
+            filename = self.instr.lightcurve[int(self.instr.instr[2:])-1]
         else:
             # logger.warning("other instruments not yet implemented")
             filename = self.instr.lightcurve
