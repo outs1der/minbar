@@ -1277,11 +1277,13 @@ class Bursts(Minbar):
     def create_distance_correction(self):
         """
         Create an array of distance corrections, 4 pi d^2, for each burst.
-        This can be used to easily convert flux to luminosity.
+        This can be used to easily convert flux to luminosity, assuming
+        isotropic X-ray emission and neglecting the bolometric correction
         
-        Returns correction factor (cm^2), error, distance (kpc), error. Furthermore,
-        these arrays are stored and can be accessed as self['fieldname'], with fieldnames
-        distcor, distcore, dist, diste.
+	Returns correction factor (cm^2), error, distance (kpc, from the
+	Source table), error. Furthermore, these arrays are stored and can
+	be accessed as self['fieldname'], with fieldnames distcor,
+        distcore, dist, diste.
         """
         s = Sources()
         dist = np.zeros(len(self.records))
