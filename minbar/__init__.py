@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.14.2'
+__version__ = '1.16.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -1243,7 +1243,7 @@ class Observations(Minbar):
         return "Multi-INstrument oBservation ARchive (MINBAR) ({} {}s from {} sources)".format(
             len(self.records), self.entryname, len(self.names))
 
-    def plot(self, bursts=True, entry=None, lightcurve=None, **kwargs):
+    def plot(self, bursts=True, entry=None, lightcurve=None, show=True, **kwargs):
         """
         Simple plotting interface for MINBAR observations, useful for
         producing (for example) summary plots of source behaviour over the
@@ -1344,7 +1344,8 @@ class Observations(Minbar):
         if (nburst > 0) | (len(set(instr)) > 1):
             plt.legend()
 
-        plt.show()
+        if show:
+            plt.show()
 
         if entry is not None:
             # restore the original selection
