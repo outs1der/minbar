@@ -9,6 +9,15 @@ import glob
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
+
+def get_version():
+    """Get the version number of pyminbar"""
+    # ## the original inspired by Paul's Aegean package
+    # ## does not work with siplified imports trick in __init__.py
+    import minbar
+    return minbar.__version__
+
+
 setuptools.setup(
     # Needed to silence warnings (and to be a worthwhile package)
     name='minbar',
@@ -21,7 +30,7 @@ setuptools.setup(
     install_requires=['numpy', 'pandas', 'astropy', 'scipy'],
     # see https://semver.org for guidelines
     # *strongly* suggested for sharing
-    version='1.13.1',
+    version=get_property('__version__', package_name),
     # The license can be anything you like
     license='GNU GPLv3',
     description='Python package for analysing observational data of thermonuclear (type-I) X-ray bursts observed by RXTE/PCA, BeppoSAX/WFC and INTEGRAL/JEM-X', 

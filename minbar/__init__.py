@@ -17,9 +17,14 @@ https://iopscience.iop.org/article/10.3847/1538-4365/ab9f2e
 
 (c) 2020, Duncan Galloway duncan.galloway@monash.edu & Laurens Keek,
   laurens@xrb.space
+
 Updated for MINBAR DR1, 2020, Duncan Galloway, duncan.galloway@monash.edu
 Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 """
+
+__author__ = """Laurens Keek and Duncan Galloway"""
+__email__ = 'duncan.galloway@monash.edu'
+__version__ = '1.16.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -34,13 +39,15 @@ import logging
 import sys
 
 import matplotlib.pyplot as plt
+from matplotlib import gridspec
+import matplotlib.ticker as mticker
 
 # kpc = 3.086e21 # cm
 kpc = u.kpc.to('cm')*u.cm # cm
 
 # Record the version and current date for analysis timestamps
 
-VERSION = 1.0
+VERSION = __version__
 DATE = datetime.now()
 
 # Local paths for MINBAR data; you need to update this when installing
@@ -48,7 +55,7 @@ DATE = datetime.now()
 # This is NOT the directory where the table data files are found
 # LOCAL_DATA flag is now determined dynamically as part of minbar.__init__
 
-MINBAR_ROOT = '/home/burst/minbar'
+MINBAR_ROOT = '/Users/Shared/burst/minbar'
 # LOCAL_DATA = True
 MINBAR_URL = 'https://burst.sci.monash.edu/'
 
@@ -163,6 +170,14 @@ UCXBS = ['4U 0513-40', '4U 0614+09', '2S 0918-549', '4U 1246-588',
            'XMMU J181227.8-181234', '4U 1812-12', '4U 1820-303',
            'XB 1832-330', '4U 1850-086', 'XB 1905+000', 'XB 1916-053',
            'M15 X-2']
+
+# Set up for publication-quality plots
+
+plt.rcParams.update({
+    "text.usetex": True,
+    "font.family": "Times"
+})
+
 
 def create_logger():
     """
@@ -744,8 +759,7 @@ class Minbar(IDLDatabase):
 
 class Bursts(Minbar):
     """
-    Read the MINBAR IDL database and give access to its
-    contents.
+    Read the MINBAR IDL database and give access to its contents.
     
     Example usage:
     import minbar
@@ -956,9 +970,180 @@ class Bursts(Minbar):
 
         return _data
 
+
+    def burstplot(self, entry=None, param='flux', bdata=None, show=True, 
+        **kwargs):
+        """
+	General-purpose routine to plot burst data. Would like to be able
+	to call this in a number of ways, both with a burst ID from
+	MINBAR, but also with a pandas table (as read in with
+	get_burst_data, for example). And do a bunch of different plots,
+        including the three-panel "in 't Zand" plot (see
+	e.g. Fig 3, in 't Zand et al. 2012, A&A 547, A47), as well as the
+        three-panel "HR-diagram" version
+
+        TODO add some annotation identifying the burst, somewhere...
+
+        Usage:
+        burstplot(burst,param='rad',xlim=[-5,25])
+        burstplot(burst,param=['flux','rad','kT','chisq'])
+
+        :param entry: MINBAR burst entry # to plot
+        :param param: parameter or list of parameters to plot; special
+          'hr' to plot the three-panel HR-diagram version
+        :param bdata: alternative table of input data, e.g. for bursts not
+          in MINBAR
+        :param show: show the figure immediately if True, otherwise
+          withhold it (e.g. to add further annotation etc.)
+        """
+
+        def plot_param(bdata, ax, param='flux', ylabel=None, color=None):
+            """
+            This routine is called by burstplot to display each panel of data
+            It plots binned data as steps, with errors
+
+            :param bdata: burst data to plot
+            :param ax: axis to plot on
+            :param param: parameter to plot; has to be present in bdata
+            :param ylabel: dict of y-labels, param names as key
+            :param color: dict of colors, param names as key
+            """
+    
+            has_error = np.all([x in bdata for x in [param+'_min',param+'_max']]) | (param == 'r')
+    
+            # filter on good data
+            _gd = bdata.flux*bdata.fluxerr > 0
+
+            # add an extra value copy here to plot that last step
+            ax.step(np.append(bdata.time[_gd].values, 
+                bdata.time[_gd][-1:].values+bdata.dt[_gd][-1:].values), 
+                np.append(bdata[param][_gd].values,bdata[param][_gd][-1:].values),
+                where='post',color=color[param])
+            if has_error:
+                if param == 'r':
+                    yerr = bdata['re'][_gd]
+                else:
+                    yerr = np.stack((bdata[param][_gd]-bdata[param+'_min'][_gd],
+                        bdata[param+'_max'][_gd]-bdata[param][_gd]))
+                ax.errorbar(bdata.time[_gd]+bdata.dt[_gd]/2., bdata[param][_gd], yerr,
+                             fmt='none',ecolor=color[param])
+            ax.set_ylabel(ylabel[param])
+
+        xlabel='Time [s]'
+
+        # Set the label names and colours here. To be passed also to
+        # plot_param
+        # Might need to set up some custom labels for the different
+        # conventions of the SAX and RXTE data
+        ylabel = {'r': 'Count rate [s$^{-1}$]',
+                  'flux': 'Flux [$10^{-9} \mathrm{erg\,cm^{-2}\,s^{-1}}$]',
+                  'kT': 'kT [keV]', 
+                  'rad': 'Blackbody normalisation\n[$(R_{\mathrm{km}}/d_{10\ \mathrm{kpc}})^2$]',
+                  'chisq': 'Fit $\chi^2/n_{\mathrm{DOF}}$'}
+        color = {'r': 'k', 'flux': 'k', 'kT': 'r', 'rad': 'b', 'chisq': 'g'}
+    
+        # check that the passed labels match one of the above
+
+        test_param = param
+        if type(param) == str:
+            test_param = [param]
+        for _param in test_param:
+            if (_param not in ylabel.keys()) & (_param != 'hr'):
+                print ('** ERROR ** plot ID {} not recognized; allowed choices are:'.format(_param))
+                for k in ylabel.keys():
+                    print ('  {}: {}'.format(k, ylabel[k]))
+                print ('  hr: show 3-panel plot with HR-style diagram')
+                return None
+
+        # Get the data here
+
+        if (bdata is None) & (entry is None):
+            logger.error('please specify either the burst data or MINBAR ID')
+            return
+        elif (bdata is None) & (entry is not None):
+            bdata = self.get_burst_data(entry)
+
+        fig = plt.figure()
+    
+        # Use GridSpec to constrain the layout, for maximum flexibility; see 
+        # https://matplotlib.org/stable/tutorials/intermediate/gridspec.html
+    
+        if param == 'hr':
+            # this is the special three-panel plot with flux, blackbody
+            # radius, and the H-R diagram on the right, with temperature
+            # vs. flux
+
+            gs = gridspec.GridSpec(2, 2)
+        
+            # kT - flux plot
+            ax0 = fig.add_subplot(gs[:,1])
+            kT_err = np.stack((bdata['kT']-bdata['kT_min'],bdata['kT_max']-bdata['kT']))
+            flux_err = np.stack((bdata['flux']-bdata['flux_min'],bdata['flux_max']-bdata['flux']))
+
+            ax0.errorbar(bdata.kT, bdata.flux, flux_err, kT_err)
+            ax0.set_yscale('log')
+            ax0.set_xscale('log')
+            ax0.invert_xaxis()
+            # ax0.ticklabel_format(useOffset=False, style='plain')
+            ax0.xaxis.set_minor_formatter(mticker.ScalarFormatter())
+            # ax0.ticklabel_format(style='plain', axis='x')
+            ax0.set_xlabel(ylabel['kT'])
+            ax0.yaxis.tick_right()
+            ax0.yaxis.set_ticks_position('both')
+            ax0.yaxis.set_label_position('right')
+            ax0.set_ylabel(ylabel['flux'])
+        
+            ax1 = fig.add_subplot(gs[0,0])
+            plot_param(bdata, ax1, 'flux', ylabel, color)
+        
+            ax2 = fig.add_subplot(gs[-1,0], sharex=ax1)
+            plot_param(bdata, ax2, 'rad', ylabel, color)
+            ax2.set_xlabel(xlabel)
+        else:
+            # generic plot
+            if type(param) != list:
+                param = [param]
+
+            gs = gridspec.GridSpec(len(param), 1)
+
+            for i, _param in enumerate(reversed(param)):
+
+                if i == 0:
+                    ax0 = plt.subplot(gs[len(param)-i-1])
+                    plot_param(bdata, ax0, _param, ylabel, color)
+                    this_ax = ax0
+
+                else:
+                    axi = plt.subplot(gs[len(param)-i-1], sharex = ax0)
+                    plot_param(bdata, axi, _param, ylabel, color)
+                    plt.setp(axi.get_xticklabels(), visible=False)
+                    this_ax = axi
+
+                # This won't work if you have chisq as the first parameter
+                if _param == 'chisq':
+                    this_ax.axhline(1, color='grey', linestyle='--')
+
+            ax0.set_xlabel(xlabel)
+            plt.subplots_adjust(hspace=.0)
+
+            # interpret kwargs here
+            if 'xlim' in kwargs:
+                plt.xlim(kwargs['xlim'])
+            # print (kwargs)
+
+        plt.tight_layout()
+
+        if show:
+            plt.show()
+
+        return fig
+
+
     def get_lc(self, id, pre=16., post=None):
         """
         Preliminary routine to return the lightcurve corresponding to a burst
+        from the lightcurve for the host observation
+
         Later this should probably be incorporated into a Burst object or similar
         Usage:
         b = minbar.Bursts()
@@ -1111,11 +1296,13 @@ class Bursts(Minbar):
     def create_distance_correction(self):
         """
         Create an array of distance corrections, 4 pi d^2, for each burst.
-        This can be used to easily convert flux to luminosity.
+        This can be used to easily convert flux to luminosity, assuming
+        isotropic X-ray emission and neglecting the bolometric correction
         
-        Returns correction factor (cm^2), error, distance (kpc), error. Furthermore,
-        these arrays are stored and can be accessed as self['fieldname'], with fieldnames
-        distcor, distcore, dist, diste.
+	Returns correction factor (cm^2), error, distance (kpc, from the
+	Source table), error. Furthermore, these arrays are stored and can
+	be accessed as self['fieldname'], with fieldnames distcor,
+        distcore, dist, diste.
         """
         s = Sources()
         dist = np.zeros(len(self.records))
@@ -1230,6 +1417,114 @@ class Observations(Minbar):
         return "Multi-INstrument oBservation ARchive (MINBAR) ({} {}s from {} sources)".format(
             len(self.records), self.entryname, len(self.names))
 
+    def plot(self, bursts=True, entry=None, lightcurve=None, **kwargs):
+        """
+        Simple plotting interface for MINBAR observations, useful for
+        producing (for example) summary plots of source behaviour over the
+        MINBAR sample
+
+        This routine works off the fluxes in the current selection, which
+        could include multiple sources (no current method to plot for >1
+        sources)
+
+        :param bursts: boolean flag to toggle plotting of bursts
+        :param entry: alternative selection method, by just passing an
+          array of the observation ID numbers
+        :param lightcurve: boolean to trigger plotting of the high-time
+          resolution lightcurves. By default, this will plot the
+          lightcurves if there are less than 10 observations or they cover
+          10d or less
+
+        Example usage:
+        import minbar
+        o = minbar.Observations()
+        o.select('4U 1636-536')
+        o.select(0,'flux',exclude=True) # don't plot zero fluxes
+        o.plot()
+
+        # or alternatively, for individual observations
+        o.plot(entry=[14637,14639])
+        """
+
+        if (entry is not None):
+            sel_old = self.selection # store to preserve the selection
+            self.clear()
+            self.select(entry, 'entry')
+
+        # by default, we adopt the flux range for the table data; if we're
+        # reading in lightcurves later on this may be modified
+        yrange = (min(self['flux']-self['e_flux']), 
+                max(self['flux']+self['e_flux']))
+
+        if (len(set(self['name'])) > 1):
+            logger.warning('multiple sources in current selection, can\'t plot')
+            return
+        src = self['name'][0]
+
+        fig = plt.figure()
+
+        extent = max(self['tstop'])-min(self['tstart'])
+        if lightcurve is None:
+            lightcurve = self.local_data & ((len(self['entry']) <= 10) | (extent <= 10.))
+
+        instr = np.array([x[:2] for x in self['instr']])
+        label = {'IJ': '{\it INTEGRAL}/JEM-X', 'SW': '{\it BeppoSAX}/WFC',
+            'XP': '{\it RXTE}/PCA'}
+        colors = {'IJ': 'C0', 'SW': 'C1', 'XP': 'C2'}
+
+        for _instr in set(instr):
+            _s = instr == _instr
+            if lightcurve:
+                # plot individual high-time resolution lightcurves
+                # not yet tested
+                _label = label[_instr]
+                for _id in self['entry'][_s]:
+                    _obs = Observation(self[_id])
+                    _obs.plot(fig, show=False, show_bursts=False, 
+                        label=_label, color=colors[_instr])
+                    # have to calculate the yrange progressively here with
+                    # each lightcurve
+                    yrange = (min([yrange[0], min(_obs.rate.value)]),
+                        max([yrange[1], max(_obs.rate.value)]))
+                    _label = None
+            else:
+                # just plot the averaged fluxes over the entire observation
+                plt.errorbar(0.5*(self['tstart'][_s]+self['tstop'][_s]),
+                    self['flux'][_s], yerr = self['e_flux'][_s],
+                    xerr = 0.5*(self['tstop'][_s]-self['tstart'][_s]),
+                    fmt='.', label=label[_instr], color=colors[_instr])
+
+        # need a reverse lookup for the bursts; this is pretty slow, but I
+        # can't think of a better way to do it
+        # Actually this is already implemented in select!
+
+        if bursts:
+            self.bursts.clear()
+            self.bursts.select(self['entry'], 'entry_obs')
+
+            nburst = len(self.bursts['time'])
+            if nburst > 0:
+                burst_pos = yrange[1]*1.05 - 0.05*yrange[0]
+                plt.plot(self.bursts['time'],
+                    np.full(len(self.bursts['time']), burst_pos),'|r',
+                    label='type-I bursts')
+            else:
+                logger.info('no bursts to show in current selection')
+            self.bursts.clear()
+
+        plt.xlabel('Time [MJD]')
+        plt.ylabel('Flux [3-25 keV, $10^{-9}\, \mathrm{erg\,cm^{-2}\,s^{-1}}$]')
+        if (nburst > 0) | (len(set(instr)) > 1):
+            plt.legend()
+
+        plt.show()
+
+        if entry is not None:
+            # restore the original selection
+            self.selection = sel_old
+
+        return fig
+
 
 class Observation:
     """
@@ -1310,7 +1605,7 @@ class Observation:
         output = "MINBAR observation of {}\nInstrument: {}\nObsID: {}".format(
             self.name, self.instr.name, self.obsid)
         if hasattr(self,'tstart') & hasattr(self,'tstop'):
-            output += "\nTime range: {}-{}".format(self.tstart, self.tstop)
+            output += "\nTime range: MJD {}-{}".format(self.tstart.value, self.tstop)
         _path = self.get_path()
         if _path is not None:
             output += "\nData path: {}".format(_path)
@@ -1339,29 +1634,42 @@ class Observation:
         obs2.plot(fig)
 
         """
+        ylabel = 'Rate (count s$^{-1}$ cm$^{-2}$)'
+
         if self.time is None:
             self.get_lc()
-            if self.time is None:
-                return
 
         if figure is None:
             figure = plt.figure()
 
-        # plt.plot(lc['TIME'],lc['RATE'])
-        # plot can't work with "raw" time units
-        # the duplication of .mjd is not a typo below! Also the scale method
-        # is for Time objects, which mjd should be defined as
-        plt.plot(self.mjd.mjd, self.rate, **kwargs)
-        plt.xlabel('Time (MJD '+self.mjd.scale.upper()+')')
-        plt.ylabel('Rate (count s$^{-1}$ cm$^{-2}$)')
+        if self.time is None:
+            logger.info('Showing schematic plot for flux')
+            ylabel = 'Flux (3-25 keV, $10^{-9}\ \rm{erg\,cm^{-2}\,s^{-1}$)'
+            plt.errorbar(0.5*(self.tstart+self.tstop), self.flux, 
+                xerr=0.5*(self.tstop-self.tstart), yerr=self.e_flux, **kwargs)
+            rate_max = (self.flux+self.e_flux).value
+            rate_range = rate_max
+            plt.ylim((0,rate_max+rate_range*0.1))
+            tscale = ''
+
+        else:
+            # plt.plot(lc['TIME'],lc['RATE'])
+            # plot can't work with "raw" time units
+            # the duplication of .mjd is not a typo below! Also the scale method
+            # is for Time objects, which mjd should be defined as
+            plt.plot(self.mjd.mjd, self.rate, **kwargs)
+
+            rate_max = np.nanmax(self.rate)
+            rate_range = rate_max-np.nanmin(self.rate)
+            tscale = self.mjd.scale.upper()
+
+        plt.xlabel('Time (MJD '+tscale+')')
+        # plt.ylabel(ylabel)
 
         if hasattr(self, 'bursts') & show_bursts:
             # also plot the bursts
-            rate_max = np.nanmax(self.rate)
-            rate_range = rate_max-np.nanmin(self.rate)
             plt.plot(self.bursts['time'], 
                 rate_max+0.05*rate_range * np.full(len(self.bursts), 1), sym_burst)
-
         if show:
             plt.show()
 
@@ -1438,6 +1746,12 @@ class Observation:
         def read_fits_lc(file, effarea = 1.*u.cm**2):
             """
             Utility routine to read in the important bits of a lightcurve
+
+            :param file: name of file to read in
+            :param effarea: effective area adopted to convert count rate to
+              counts/cm^2/s (standard for MINBAR lightcurves)
+
+            :return: time, rate, error, timesys, timeunit, mjd, gti
             """
 
             # print (path+'/'+filename)
@@ -1445,10 +1759,10 @@ class Observation:
 
             # For XTE files, convention is to have the first extension RATE and a second extension STDGTI
             header = lcfile[0].header
-            instrument = header['INSTRUME']
-            if instrument != 'PCA':
+            if 'INSTRUME' not in header:
                 # For WFC, TIMESYS etc. are in the first extension header
                 header = lcfile[1].header
+            instrument = header['INSTRUME']
             lc = lcfile[1].data
 
             gti_ext = None
@@ -1465,8 +1779,6 @@ class Observation:
             timesys = header['TIMESYS']
             timeunit = header['TIMEUNIT']
             time = lc['TIME']*u.Unit(timeunit)
-            if timesys == 'MJD':
-                mjd = Time( time, format='mjd', scale='utc')
 
             rate = lc['RATE']/u.s/effarea
             error = lc['ERROR']/u.s/effarea
@@ -1484,6 +1796,12 @@ class Observation:
 
                 return time, rate, error, timesys, timeunit, mjd, pca_time_to_mjd_tt(gti*u.Unit(timeunit), header).utc
             else:
+                if 'MJDREF' in header:
+                    time += header['MJDREF']*u.d
+                mjd = Time( time, format='mjd', scale=timesys.lower())
+                if timesys == 'TT':
+                    mjd = mjd.utc
+
                 return time, rate, error, timesys, timeunit, mjd, None
 
         path = self.get_path()
@@ -1508,6 +1826,10 @@ class Observation:
             # also have to translate to the name set used in the filenames
             __name = self.instr.source_path[np.where(self.instr.source_name == self.name)[0]][0]
             filename = self.instr.lightcurve(__name, self.obsid, self.instr.instr[2:])
+        elif self.instr.label == 'IJ':
+            # JEM-X can have multiple lightcurves, but that's not implemented
+            # yet. Instead we pick one of them for the JEM-X1 or -X2 here
+            filename = self.instr.lightcurve[int(self.instr.instr[2:])-1]
         else:
             # logger.warning("other instruments not yet implemented")
             filename = self.instr.lightcurve
