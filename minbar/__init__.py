@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.15.0'
+__version__ = '1.16.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -47,7 +47,7 @@ kpc = u.kpc.to('cm')*u.cm # cm
 
 # Record the version and current date for analysis timestamps
 
-VERSION = 1.0
+VERSION = __version__
 DATE = datetime.now()
 
 # Local paths for MINBAR data; you need to update this when installing
@@ -1038,10 +1038,23 @@ class Bursts(Minbar):
         ylabel = {'r': 'Count rate [s$^{-1}$]',
                   'flux': 'Flux [$10^{-9} \mathrm{erg\,cm^{-2}\,s^{-1}}$]',
                   'kT': 'kT [keV]', 
-                  'rad': 'Blackbody normalisation [$(R_{\mathrm{km}}/d_{10\ \mathrm{kpc}})^2$]',
+                  'rad': 'Blackbody normalisation\n[$(R_{\mathrm{km}}/d_{10\ \mathrm{kpc}})^2$]',
                   'chisq': 'Fit $\chi^2/n_{\mathrm{DOF}}$'}
         color = {'r': 'k', 'flux': 'k', 'kT': 'r', 'rad': 'b', 'chisq': 'g'}
     
+        # check that the passed labels match one of the above
+
+        test_param = param
+        if type(param) == str:
+            test_param = [param]
+        for _param in test_param:
+            if (_param not in ylabel.keys()) & (_param != 'hr'):
+                print ('** ERROR ** plot ID {} not recognized; allowed choices are:'.format(_param))
+                for k in ylabel.keys():
+                    print ('  {}: {}'.format(k, ylabel[k]))
+                print ('  hr: show 3-panel plot with HR-style diagram')
+                return None
+
         # Get the data here
 
         if (bdata is None) & (entry is None):
@@ -1074,6 +1087,11 @@ class Bursts(Minbar):
             # ax0.ticklabel_format(useOffset=False, style='plain')
             ax0.xaxis.set_minor_formatter(mticker.ScalarFormatter())
             # ax0.ticklabel_format(style='plain', axis='x')
+            ax0.set_xlabel(ylabel['kT'])
+            ax0.yaxis.tick_right()
+            ax0.yaxis.set_ticks_position('both')
+            ax0.yaxis.set_label_position('right')
+            ax0.set_ylabel(ylabel['flux'])
         
             ax1 = fig.add_subplot(gs[0,0])
             plot_param(bdata, ax1, 'flux', ylabel, color)
@@ -1089,7 +1107,6 @@ class Bursts(Minbar):
             gs = gridspec.GridSpec(len(param), 1)
 
             for i, _param in enumerate(reversed(param)):
-                assert _param in bdata
 
                 if i == 0:
                     ax0 = plt.subplot(gs[len(param)-i-1])
@@ -1113,6 +1130,8 @@ class Bursts(Minbar):
             if 'xlim' in kwargs:
                 plt.xlim(kwargs['xlim'])
             # print (kwargs)
+
+        plt.tight_layout()
 
         if show:
             plt.show()
