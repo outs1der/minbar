@@ -1,5 +1,5 @@
 """
-Python class to easily extract information from MINBAR.
+Python classes to easily extract information from MINBAR.
 Provides the burst catalog (Bursts), observation catalog (Observations),
 and source catalog (Sources). See the doc strings of those classes
 for example usage.
@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.16.0'
+__version__ = '1.17.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -208,8 +208,9 @@ def mjd_to_ss(time):
     Conversion below is chosen for consistency with the IDL tconv routine, as well
     as the xtime page, with the "Apply Clock Offset Correction(s) for RXTE and Swift"
     option; see https://heasarc.gsfc.nasa.gov/cgi-bin/Tools/xTime/xTime.pl
-    :param time:
-    :return:
+
+    :param time: time scalar or array in MJD UTC
+    :return: converted times in RXTE Spacecraft seconds
     """
 
     _time = Time(time, scale='utc', format='mjd')
@@ -223,6 +224,7 @@ def verify_path(source, path, source_path, verbose=True):
     Generic routine to verify the data path, and try to match up the source names with the
     directories in the tree
     Should be incorporated into the Instrument class
+
     :param source:
     :param path:
     :param source_path:
@@ -264,12 +266,16 @@ You should check your source to directory name mapping""".format(nonmatched, nmi
 
 class Minbar(IDLDatabase):
     """
-    This class is provided to access EITHER the IDL database or the information via the MRT tables
-    Gradually moving the methods from the Burst class here, so they can also be used by the
-    Observations class
-    Behaviour is controlled by the selection attribute, which indicates which of the table entries
-    are selected for display or data extraction
-    Ordering is persistent and is controlled by the order attribute, by default time ordering
+    This class is provided to access MINBAR burst or observation data
+    EITHER from the MRT tables (publicly available) or from the original
+    IDL database files.  Methods here are common to both 
+    :class:`minbar.Bursts` and :class:`minbar.Observations` classes
+
+    Visibility is controlled by the ``selection`` attribute, which indicates
+    which of the table entries are selected for display or data extraction
+
+    Ordering is persistent and is controlled by the ``order`` attribute, by
+    default time ordering
     """
 
     def __init__(self, filename=None, IDL=False):
@@ -343,8 +349,10 @@ class Minbar(IDLDatabase):
     def show(self, attributes=None, all=False):
         """
         Display the object in a user-friendly way
-        :param attributes:
-        :param all:
+
+        :param attributes: list of attributes to display; both :class:`minbar.Bursts` and :class:`minbar.Observations` classes have a (short) default list
+        :param all: set to ``True`` to display all the attributes
+
         :return:
         """
 
@@ -405,7 +413,7 @@ class Minbar(IDLDatabase):
 
     def get_type(self):
         """
-        Return an index array selecting the specified burst type (self.type).
+        Return an index array selecting the specified burst type (``self.type``).
         """
         if self.type == None:
             return np.ones(len(self.records), bool)
@@ -415,8 +423,8 @@ class Minbar(IDLDatabase):
 
     def clear(self):
         """
-        Clear the selection. If self.type is not None, only bursts of the given
-        type are selected.
+	Clear the current selection. If ``self.type`` is not ``None``,
+        only bursts of the given type are selected.
         """
         self.name = ''
         self.selection = self.get_type()
@@ -427,10 +435,20 @@ class Minbar(IDLDatabase):
 
     def select(self, value, attribute='name', exclude=False):
         """
-        Set the selection to the source with given name.
-        Previously this would reset the previous selection, but now it respects any prior filter
-        Allows multiple items and uses implied or; also implements exclusion
+	Define a selection for filtering entries based on the provided
+        value(s) and attribute.
+
+	Previously this would reset the previous selection, but now it
+	preserves any prior filter, so as to allows multiple chained
+        selections using implied or; also implements exclusion
+
+        :param value: single value or array to match
+        :param attribute: attribute to match on values; default is ``name``
+        :param exclude: set to ``True`` to instead *exclude* the selection
+
+        :return: Minbar object
         """
+
         if attribute not in self.field_names:
             logger.error('attribute {} not present in table'.format(attribute))
             return None
@@ -482,12 +500,14 @@ class Minbar(IDLDatabase):
     def sort(self, attribute='time', ascending=True, descending=False):
         """
         Basic sort functionality; will modify the default ordering of the selection,
-        until another sort parameter is chosen, or a call to clear() is made
-        (which replaces the default sort field as time)
+        until another sort parameter is chosen, or a call to
+	:meth:`minbar.Minbar.clear` is made (which replaces the default
+        sort field as time)
 
         Usage:
-        b.sort('tdel',descending=True) # sort the selected bursts in descending order
-                                       #   of the time since the last burst
+
+        | b.sort('tdel',descending=True) # sort the selected bursts in descending order
+        |                                #   of the time since the last burst
 
         :param attribute: (single) table attribute to sort on
         :param ascending: set to False to sort descending instead
@@ -511,7 +531,9 @@ class Minbar(IDLDatabase):
     def obsid(self, obsid):
         """
         Select observations with a particular obsid
-        :param obsid:
+
+        :param obsid: Observation ID to select
+
         :return:
         """
 
@@ -519,7 +541,8 @@ class Minbar(IDLDatabase):
 
     def name_like(self, name):
         """
-        Like select, but get the name from get_name_like().
+        Like select, but get the source name from
+        :meth:`minbar.Minbar.get_name_like`.
         If multiple names are found, the first is selected
         and the rest are reported.
         """
@@ -540,8 +563,10 @@ class Minbar(IDLDatabase):
         """
         Multi-purpose function to find attributes matching a particular string
         Output can then be used as input to select
+
         :param value:
         :param attribute:
+
         :return:
         """
         to_search = self[attribute]  # includes the selection
@@ -571,7 +596,7 @@ class Minbar(IDLDatabase):
 
     def _pad_name(self, name):
         """
-        Source names in records are padded with spaces. This routine pads with
+        Source names in records are padded with spaces. This routine pads the
         given name with spaces for comparison to the records.
         """
         size = self.records['name'].dtype.itemsize
@@ -585,10 +610,10 @@ class Minbar(IDLDatabase):
         result.
         Modified to allow getting data from an attribute, if it is
         not available in the standard database.
-        Mainly for use by __getitem__
+        Mainly for use by :meth:`minbar.Minbar.__getitem__`
+
         :param field: field name or array of field names
-        :return: astropy MaskedColumn giving the data subject to the
-                 current selection
+        :return: astropy MaskedColumn giving the data subject to the current selection
         """
         fields_ok = True
         if np.shape(field) != ():
@@ -617,19 +642,24 @@ class Minbar(IDLDatabase):
 
     def __getitem__(self, field):
         """
-        Originally this routine was just a shorthand for get(), but has been
+        Originally this routine was just a shorthand for
+        :meth:`minbar.Minbar.get`, but has been
         expanded to to also return the item with the entry number; return selected
         items from the current selection; and return
+
         Note that the ID selections below ignore the data selection, and also
-        return astropy Tables (rather than Bursts or Observations objects) so
-        you unfortunately can't use the show() method after selecting
+        return astropy Tables (rather than :class:`minbar.Bursts` or
+        :class:`minbar.Observations` objects) so
+	you unfortunately can't use the :meth:`minbar.Minbar.show` method
+        after selecting
 
         Usage:
-        b['time'] - return all the times for the current selection
-        b[2094] - return the entry for ID 2094 (ignores current selection)
-        b[[2094,2095]] - return the entry for IDs 2094, 2095
-        b[['time','tau','bpflux']] - return all the attributes for the current selection
-        b[b['time'] > 54000.] - return only those items with the selected properties
+
+        | b['time'] - return all the times for the current selection
+        | b[2094] - return the entry for ID 2094 (ignores current selection)
+        | b[[2094,2095]] - return the entry for IDs 2094, 2095
+        | b[['time','tau','bpflux']] - return all the attributes for the current selection
+        | b[b['time'] > 54000.] - return only those items with the selected properties
         """
 
         if (np.shape(field) != ()) & (np.shape(field) != (1,)):
@@ -685,6 +715,7 @@ class Minbar(IDLDatabase):
         More general-purpose routine to allow selections (and exclusions) on instr
         :param instrument:
         :param exclude:
+
         :return:
         """
 
@@ -711,7 +742,9 @@ class Minbar(IDLDatabase):
     def instr_exclude(self, instrument):
         """
         Wrapper for instr
+
         :param instrument:
+
         :return:
         """
         self.instr(instrument, exclude=True)
@@ -759,24 +792,25 @@ class Minbar(IDLDatabase):
 
 class Bursts(Minbar):
     """
-    Read the MINBAR IDL database and give access to its contents.
+    Class with the MINBAR bursts
     
     Example usage:
-    import minbar
-    mb = minbar.Bursts()
-    mb.name_like('1636') # Select a source using part of its name
-    print mb.field_labels # See which fields are available
-    time = mb['time'] # Get a field as a numpy array (automatically time-ordered)
-    flux = mb['pflux']*1e-9 # Flux in erg/s/cm2
-    mb.create_distance_correction() # Include distance information from Sources()
-    distance = mb['dist']
-    luminosity = flux*mb['distcor'] # Luminosity in erg/s
+
+    | import minbar
+    | mb = minbar.Bursts()
+    | mb.name_like('1636') # Select a source using part of its name
+    | print mb.field_labels # See which fields are available
+    | time = mb['time'] # Get a field as a numpy array (automatically time-ordered)
+    | flux = mb['pflux']*1e-9 # Flux in erg/s/cm2
+    | mb.create_distance_correction() # Include distance information from Sources()
+    | distance = mb['dist']
+    | luminosity = flux*mb['distcor'] # Luminosity in erg/s
     
-    mb.name_like('1826') # Replace selection by another source
-    mb.select_all(['GS 1826-24', '4U 1636-536']) # Select multiple sources; requires exact names
-    mb.clear() # Clear the selection so all sources are included
-    mb.exclude_like('1636') # Exclude source from selection
-    mb.exclude_like('1826') # Now two sources are excluded
+    | mb.name_like('1826') # Replace selection by another source
+    | mb.select_all(['GS 1826-24', '4U 1636-536']) # Select multiple sources; requires exact names
+    | mb.clear() # Clear the selection so all sources are included
+    | mb.exclude_like('1636') # Exclude source from selection
+    | mb.exclude_like('1826') # Now two sources are excluded
     """
     
     timefield = 'time' # The field used for determining time order
@@ -786,11 +820,8 @@ class Bursts(Minbar):
         """
         Create a new Bursts instance using the data from the minbar database.
         
-        filename: path to the database files, excluding their extension.
-                  By default the minbar database in the directory of this
-                  script is used.
-        type: burst type. The default, 1, selects all vetted Type I bursts. Setting it
-              to None means no type is selected.
+        :param filename: path to the database files, excluding their extension.  By default the minbar database in the directory of this script is used.
+        :param type: burst type. The default, 1, selects all vetted Type I bursts. Setting it to None means no type is selected.
         """
 
         # IDLDatabase.__init__(self, filename)
@@ -809,11 +840,14 @@ class Bursts(Minbar):
         """
         Retrieve time-resolved spectroscopy for this burst
         Replacement for the get_burst_data IDL function
-        :param id:
-        :return:
+
         Example usage:
-        data1 = b.get_burst_data(2380)
-        data2 = b.get_burst_data(1600)
+
+        | data1 = b.get_burst_data(2380)
+        | data2 = b.get_burst_data(1600)
+
+        :param id: MINBAR burst ID to retrieve data
+        :return: data object
         """
 
         instr = self[id]['instr']
@@ -979,22 +1013,20 @@ class Bursts(Minbar):
 	MINBAR, but also with a pandas table (as read in with
 	get_burst_data, for example). And do a bunch of different plots,
         including the three-panel "in 't Zand" plot (see
-	e.g. Fig 3, in 't Zand et al. 2012, A&A 547, A47), as well as the
+	e.g. Fig 3, `in 't Zand et al. 2012, A&A 547, A47 <https://ui.adsabs.harvard.edu/abs/2012A%26A...547A..47I>`_), as well as the
         three-panel "HR-diagram" version
 
         TODO add some annotation identifying the burst, somewhere...
 
         Usage:
-        burstplot(burst,param='rad',xlim=[-5,25])
-        burstplot(burst,param=['flux','rad','kT','chisq'])
+
+        | burstplot(burst,param='rad',xlim=[-5,25])
+        | burstplot(burst,param=['flux','rad','kT','chisq'])
 
         :param entry: MINBAR burst entry # to plot
-        :param param: parameter or list of parameters to plot; special
-          'hr' to plot the three-panel HR-diagram version
-        :param bdata: alternative table of input data, e.g. for bursts not
-          in MINBAR
-        :param show: show the figure immediately if True, otherwise
-          withhold it (e.g. to add further annotation etc.)
+        :param param: parameter or list of parameters to plot; special 'hr' to plot the three-panel HR-diagram version
+        :param bdata: alternative table of input data, e.g. for bursts not in MINBAR
+        :param show: show the figure immediately if ``True``, otherwise withhold it (e.g. to add further annotation etc.)
         """
 
         def plot_param(bdata, ax, param='flux', ylabel=None, color=None):
@@ -1146,11 +1178,14 @@ class Bursts(Minbar):
 
         Later this should probably be incorporated into a Burst object or similar
         Usage:
-        b = minbar.Bursts()
-        mjd, rate, error = b.get_lc(2257)
+
+        | b = minbar.Bursts()
+        | mjd, rate, error = b.get_lc(2257)
+
         :param id: Burst ID to retrieve
         :param pre: pre-burst interval (in seconds) to include
         :param post: post-burst interval (in seconds) to include
+
         :return:
         """
 
@@ -1202,7 +1237,9 @@ class Bursts(Minbar):
         to the standard threshold
         Additional marginal flag will optionally include those "marginal"
         events
-        :param rexp_thresh:
+
+        :param rexp_thresh: threshold REXP value to use, if not the default
+
         :return:
         """
 
@@ -1254,8 +1291,7 @@ class Bursts(Minbar):
 
     def has_error(self, field):
         """
-        Return if there exists a field with error
-        data on field.
+        Return if there exists a field with error data on field.
         """
         error_name = self.get_error_name(field)
         return error_name in self.field_names
@@ -1263,8 +1299,7 @@ class Bursts(Minbar):
 
     def is_error(self, field):
         """
-        Return whether given field represents the
-        uncertainty in another.
+        Return whether given field represents the uncertainty in another.
         """
         if field[-1] == 'e':
             return field[:-1] in self.field_names
@@ -1287,8 +1322,7 @@ class Bursts(Minbar):
 
     def get_error_name(self, field):
         """
-        Return the name of the field containing the
-        error for field.
+        Return the name of the field containing the error for field.
         """
         return field + 'e'
 
@@ -1301,8 +1335,8 @@ class Bursts(Minbar):
         
 	Returns correction factor (cm^2), error, distance (kpc, from the
 	Source table), error. Furthermore, these arrays are stored and can
-	be accessed as self['fieldname'], with fieldnames distcor,
-        distcore, dist, diste.
+	be accessed as ``self['fieldname']``, with ``fieldname``s ``distcor``,
+        ``distcore``, ``dist``, ``diste``.
         """
         s = Sources()
         dist = np.zeros(len(self.records))
@@ -1362,7 +1396,7 @@ class Bursts(Minbar):
 
 class Observations(Minbar):
     """
-    Load MINBAR database of observations.
+    Class with the MINBAR observations (and also the bursts)
     """
     
     timefield = 'tstart' # The field used for determining time order
@@ -1399,6 +1433,7 @@ class Observations(Minbar):
     def good(self):
         """
         Filter for only the "good" observations, excluding bad flags and non detections
+
         :return:
         """
         self.exclude_flag('bcdefg')
@@ -1427,23 +1462,20 @@ class Observations(Minbar):
         could include multiple sources (no current method to plot for >1
         sources)
 
-        :param bursts: boolean flag to toggle plotting of bursts
-        :param entry: alternative selection method, by just passing an
-          array of the observation ID numbers
-        :param lightcurve: boolean to trigger plotting of the high-time
-          resolution lightcurves. By default, this will plot the
-          lightcurves if there are less than 10 observations or they cover
-          10d or less
-
         Example usage:
-        import minbar
-        o = minbar.Observations()
-        o.select('4U 1636-536')
-        o.select(0,'flux',exclude=True) # don't plot zero fluxes
-        o.plot()
 
-        # or alternatively, for individual observations
-        o.plot(entry=[14637,14639])
+        | import minbar
+        | o = minbar.Observations()
+        | o.select('4U 1636-536')
+        | o.select(0,'flux',exclude=True) # don't plot zero fluxes
+        | o.plot()
+
+        | # or alternatively, for individual observations
+        | o.plot(entry=[14637,14639])
+
+        :param bursts: boolean flag to toggle plotting of bursts
+        :param entry: alternative selection method, by just passing an array of the observation ID numbers
+        :param lightcurve: boolean to trigger plotting of the high-time resolution lightcurves. By default, this will plot the lightcurves if there are less than 10 observations or they cover 10d or less
         """
 
         if (entry is not None):
@@ -1945,8 +1977,10 @@ class Sources:
 
     def get(self, field, all=False):
         """
-        Return field with given name.
-        all: whether to return all values or only the selected source
+        Return value with given field
+
+        :param field: field name to return
+        :param all: whether to return all values or only the current selection
         """
         if field.lower() in self._fits_names:
             data = self._f[1].data[field]
