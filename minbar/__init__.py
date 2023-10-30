@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.17.0'
+__version__ = '1.18.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -61,7 +61,10 @@ MINBAR_URL = 'https://burst.sci.monash.edu/'
 
 # Bytearr entries are for consistency between the IDL and ASCII
 # versions of the data
+# TODO could simplify this information with just one dict, having entries
+# that are tuples with the required information
 
+MINBAR_INSTR_SAT = {'PCA': 'RXTE', 'WFC': 'BeppoSAX', 'JEM-X': 'INTEGRAL'}
 MINBAR_INSTR_LABEL = {'PCA': 'XP', 'WFC': 'SW', 'JEM-X': 'IJ'}
 MINBAR_INSTR_PATH = {'XP': 'xte', 'SW': 'wfc', 'IJ': 'jemx',
                      'PCA': 'xte', 'WFC': 'wfc', 'JEM-X': 'jemx',
@@ -348,12 +351,12 @@ class Minbar(IDLDatabase):
 
     def show(self, attributes=None, all=False):
         """
-        Display the object in a user-friendly way
+        Display the object in a user-friendly way, using pprint
 
         :param attributes: list of attributes to display; both :class:`minbar.Bursts` and :class:`minbar.Observations` classes have a (short) default list
         :param all: set to ``True`` to display all the attributes
 
-        :return:
+        :return: nothing
         """
 
         if attributes is None:
@@ -534,10 +537,10 @@ class Minbar(IDLDatabase):
 
         :param obsid: Observation ID to select
 
-        :return:
+        :return: class object
         """
 
-        self.select(obsid, attribute='obsid')
+        return self.select(obsid, attribute='obsid')
 
     def name_like(self, name):
         """
@@ -561,13 +564,13 @@ class Minbar(IDLDatabase):
 
     def attr_like(self, substring, attribute='name'):
         """
-        Multi-purpose function to find attributes matching a particular string
-        Output can then be used as input to select
+        Function to find attributes matching a particular string.
+        Output can then be used as input to select.
 
-        :param value:
-        :param attribute:
+        :param substring: string to match (anywhere in the attribute string)
+        :param attribute: attribute to match on
 
-        :return:
+        :return: list of indices of unique matches
         """
         to_search = self[attribute]  # includes the selection
         if attribute == 'name':
@@ -712,11 +715,15 @@ class Minbar(IDLDatabase):
 
     def instr(self, instrument, exclude=False):
         """
-        More general-purpose routine to allow selections (and exclusions) on instr
-        :param instrument:
-        :param exclude:
+        More general-purpose routine to allow selections (and exclusions)
+        on ``instr``. Values ``'pca'``, ``'wfc'`` and ``'jemx'`` match on ALL
+	configurations for those instruments (i.e. WFC 1 & 2, PCA for any
+        choice of PCUs on etc.)
 
-        :return:
+        :param instrument: string or array of strings to match
+        :param exclude: boolean, set to True to instead exclude entries for that instrument
+
+        :return: class object
         """
 
         alias = {'pca': 'XP', 'wfc': 'SW', 'jemx': 'IJ'}
@@ -741,30 +748,39 @@ class Minbar(IDLDatabase):
 
     def instr_exclude(self, instrument):
         """
-        Wrapper for instr
+	Wrapper for :meth:`minbar.Minbar.instr`, used to exclude entries
+        for the selected instrument
 
-        :param instrument:
+        :param instrument: instrument to exclude
 
-        :return:
+        :return: class object
         """
-        self.instr(instrument, exclude=True)
+
+        return self.instr(instrument, exclude=True)
 
     def select_all(self, names):
         """
-        Select multiple sources with given names. Now redundant
+        Select multiple sources with given names. Now redundant, since 
+        :meth:`minbar.Minbar.select` accepts arrays as well as single
+        strings
         """
-        self.select(names, 'name')
+
+        return self.select(names, 'name')
 
     def exclude(self, name):
         """
-        Removes source with given name from the current selection. Replaced by select
+	Removes source with given name from the current selection.  Now
+	redundant, since :meth:`minbar.Minbar.select` has the optional
+        ``exclude`` flag. 
         """
 
-        self.select(name, exclude=True)
+        return self.select(name, exclude=True)
 
     def exclude_like(self, name):
         """
-        Like exclude, but get the name from get_name_like().
+        Like :meth:`minbar.Minbar.exclude`, but get the name from 
+        :meth:`minbar.Minbar.get_name_like`.
+
         If multiple names are found, the first is excluded
         and the rest are reported.
         """
@@ -792,7 +808,9 @@ class Minbar(IDLDatabase):
 
 class Bursts(Minbar):
     """
-    Class with the MINBAR bursts
+    Class for extracting and anlysing the MINBAR burst data. The class
+    methods operate on the table read in from the MRT file, which should be
+    downloaded as part of the install process.
     
     Example usage:
 
@@ -818,7 +836,7 @@ class Bursts(Minbar):
     
     def __init__(self, filename=None, type=1, IDL=False):
         """
-        Create a new Bursts instance using the data from the minbar database.
+        Create a new Bursts instance.
         
         :param filename: path to the database files, excluding their extension.  By default the minbar database in the directory of this script is used.
         :param type: burst type. The default, 1, selects all vetted Type I bursts. Setting it to None means no type is selected.
@@ -838,8 +856,7 @@ class Bursts(Minbar):
 
     def get_burst_data(self, id):
         """
-        Retrieve time-resolved spectroscopy for this burst
-        Replacement for the get_burst_data IDL function
+        Retrieve time-resolved spectroscopy for this burst.
 
         Example usage:
 
@@ -847,7 +864,7 @@ class Bursts(Minbar):
         | data2 = b.get_burst_data(1600)
 
         :param id: MINBAR burst ID to retrieve data
-        :return: data object
+        :return: pandas DataFrame with time, kT, rad, flux, & errors, chisq etc.
         """
 
         instr = self[id]['instr']
@@ -860,6 +877,7 @@ class Bursts(Minbar):
         # First we set the _file variable, with the location of the data
         # This can be the name of a file stored locally, or a URL pointing
         # at the MINBAR website
+        _file = None
         if self.local_data:
             # Try to get the file locally
 
@@ -906,21 +924,22 @@ class Bursts(Minbar):
                 logger.error('local files not available for instrument {}'.format(instr))
                 return None
 
-            # Check that local files exist
+            # Check that local files exist, and if not reset the value, so
+            # we can fall back on the remote download option
             if not os.path.isfile(_file):
                 logger.error('time-resolved spectroscopy file {} not found!'.format(_file))
-                return None
+                _file = None
 
-        else:
-            # Try to get the data remotely
-            # URLs for the time-resolved spectroscopic data look like
-            # https://burst.sci.monash.edu/minbar/data/trs/0001_trs.dat
+        # Try to get the data remotely
+        # URLs for the time-resolved spectroscopic data look like
+        # https://burst.sci.monash.edu/minbar/data/trs/0001_trs.dat
 
-            # logger.error('Remote data retrieval not yet implemented')
+        # logger.error('Remote data retrieval not yet implemented')
 
+        if _file is None:
             _file = MINBAR_URL+'minbar/data/trs/{0:04d}_trs.dat'.format(id)
 
-            # Should also check here that the remote file exists...
+        # Should also check here that the remote file exists...
 
         # Now that we've defined the file location, read in the data
         # The format is differrent for different files
@@ -1257,9 +1276,15 @@ class Bursts(Minbar):
         self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
         self.ind = np.where(self.selection)[0][self.order]
 
+        return self
+
     def unique(self):
         """
-        Removes multiply-observed bursts, with a priority for XTE
+        Removes multiply-observed bursts, with a priority for RXTE/PCA. That
+	is, if the current selection includes a burst observed both by PCA
+        and WFC, only the PCA entry will be kept
+
+        :return: class object
         """
         instr_label = [x[0:2] for x in self['instr']]
         set_instr_label = set(instr_label)
@@ -1291,7 +1316,7 @@ class Bursts(Minbar):
 
     def has_error(self, field):
         """
-        Return if there exists a field with error data on field.
+        Return True if there exists a field with error data on field.
         """
         error_name = self.get_error_name(field)
         return error_name in self.field_names
@@ -1310,7 +1335,7 @@ class Bursts(Minbar):
     def get_error(self, field):
         """
         Return an array representing the uncertainty in
-        field. has_error() can be used to check whether
+        field. :meth:`minbar.Bursts.has_error` can be used to check whether
         errors are available. If not available, an array
         of zeros will be returned.
         """
@@ -1334,9 +1359,9 @@ class Bursts(Minbar):
         isotropic X-ray emission and neglecting the bolometric correction
         
 	Returns correction factor (cm^2), error, distance (kpc, from the
-	Source table), error. Furthermore, these arrays are stored and can
-	be accessed as ``self['fieldname']``, with ``fieldname``s ``distcor``,
-        ``distcore``, ``dist``, ``diste``.
+	:class:`minbar.Source` table), error. Furthermore, these arrays
+        are stored and can be accessed as ``self['fieldname']``, with
+        ``'fieldname'`` one of ``distcor``, ``distcore``, ``dist``, ``diste``.
         """
         s = Sources()
         dist = np.zeros(len(self.records))
@@ -1434,7 +1459,7 @@ class Observations(Minbar):
         """
         Filter for only the "good" observations, excluding bad flags and non detections
 
-        :return:
+        :return: class object
         """
         self.exclude_flag('bcdefg')
         selection = (self.records['flux'] > 3.*self.records['e_flux']) & (self.records['sig'] >= 3.)
@@ -1444,6 +1469,8 @@ class Observations(Minbar):
             logger.info('Restricted to {} "good" {}s by also excluding nondetections'.format(
                 len(np.where(self.selection)[0]), self.entryname))
         self.ind = np.where(self.selection)[0][self.order]
+
+        return self
 
     def __str__(self):
         """
@@ -1586,18 +1613,19 @@ class Observation:
         if obs_entry is not None:
             # logger.warning('initialisation from obs entry not yet completely implemented')
 
-            # create an instrument here
+            # create an instrument here, via reverse lookup on the allowed
+            # labels
             label = [key for key, value in MINBAR_INSTR_LABEL.items() if value == obs_entry['instr'][:2]][0]
             # print (label)
 
             # Don't set these parameters yet, as they'll be defined outside this block
-            instr = Instrument(label, obs_entry['instr'])
+            instr = Instrument(label, obs_entry['instr'][2:])# , obs_entry['instr'])
             name = obs_entry['name']
             obsid = obs_entry['obsid']
 
             # self.tstart = obs_entry['tstart']
             # self.tstop = obs_entry['tstop']
-            # Copy all the columns to the new object. NOTE this will includ
+            # Copy all the columns to the new object. NOTE this will include
             # the instrument label, which will be overwritten with the 
             # instrument object, below; but we keep the label by specifying it
             # as a configuration/camera above
@@ -1711,7 +1739,8 @@ class Observation:
     def get_path(self, split=False):
         """
         Return the path for MINBAR observations, assuming you have them stored locally
-        :param entry:
+
+        :param split:
         :return:
         """
 
@@ -1899,12 +1928,13 @@ class Sources:
     the file minbar_sources.fits.
     
     Example:
-    s = Sources()
-    print s.field_names # Show available data fields
-    ra = s['ra_obj'] # Right ascension for all sources
-    s.name_like('1636')
-    ra = s['ra_obj'] # Right ascension for selected source only
-    s.clear() # Clear selection
+
+    | s = Sources()
+    | print s.field_names # Show available data fields
+    | ra = s['ra_obj'] # Right ascension for all sources
+    | s.name_like('1636')
+    | ra = s['ra_obj'] # Right ascension for selected source only
+    | s.clear() # Clear selection
     """
     
     def __init__(self, filename=None, X=0.0, Gaia=True):
@@ -1995,15 +2025,18 @@ class Sources:
 
     def __getitem__(self, field):
         """
-        Return field with given name. See self.get().
+        Return field with given name. See :meth:`minbar.Sources.get`.
         """
         return self.get(field)
 
     def type(self, types):
         """
-        Select only objects matching a particular type code
-        :param types:
-        :return:
+        Select only objects matching a particular type code. As for the
+        :class:`minbar.Bursts` and :class:`minbar.Observations` classes the
+        selection is persistent until :meth:`minbar.Sources.clear` is called
+
+        :param types: one or more letters corresponding to the type code in the Sources table, e.g. 'A' for atoll, 'C' for ultracompact etc.
+        :return: number of sources matching selection
         """
         type_names = {'atoll': 'A', 'atolls': 'A', 'ultracompact': 'C', 'UCXB': 'C', 'dipper': 'D',
                       'dippers': 'D', 'eclipsing': 'E', 'globular': 'G', 'cluster': 'G',
@@ -2024,7 +2057,7 @@ class Sources:
 
     def get_name_like(self, name):
         """
-        Return a list of source indices that have 'name' in their name or name_2 fields.
+        Return a list of source indices that have 'name' in their ``name`` or ``name_2`` fields.
         Case insensitive.
         """
         name = name.lower()
@@ -2039,7 +2072,8 @@ class Sources:
 
     def name_like(self, name, verbose=True):
         """
-        Select the source with given name. Uses first result from self.get_name_like()
+        Select the source with given name. Uses first result from 
+        :meth:`minbar.Sources.get_name_like`
         """
         ind = self.get_name_like(name)
         if len(ind)>0:
@@ -2062,6 +2096,7 @@ class Sources:
     def get_F_Edd(self):
         """
         Read in information from Eddington fluxes file
+
         :return:
         """
 
@@ -2096,6 +2131,11 @@ class Sources:
         Distances taken from Table 8 of the MINBAR paper, which includes
         distances derived from the Eddington flux measured for MINBAR
         bursts, as well as distances measured from Gaia and other sources
+
+        :param X: assumed H-fraction for Eddington luminosity calculation (default is 0.0)
+        :param Gaia: boolean, set to True to adopt distances from Gaia parallax over calculated values from PRE bursts
+
+        :return: arrays dist, diste_hi, diste_lo, dist_method, giving the distances and limits (kpc) and the method
         """
 
         idist = 3 # index for distances to adopt
@@ -2262,11 +2302,14 @@ class Instrument:
     Here's a generic instrument class which can be adapted and/or duplicated for different
     instruments. This class is kept pretty lean to avoid having to replicate lots of code
     Defines the properties of an instrument with data that we're going to analyse and add to MINBAR
+
     :param name: name of the instrument
     :param source_name: list of source names, to avoid having to load a Sources object
-    Example
-    import minbar
-    jemx = minbar.Instrument('JEM-X', 'jemx', 'IJ')
+
+    Example usage:
+
+    | import minbar
+    | jemx = minbar.Instrument('JEM-X', 'jemx', 'IJ')
     """
 
     def __init__(self, name, camera=None, path=None, label=None,
@@ -2275,12 +2318,26 @@ class Instrument:
                  spectrum=None,
                  verbose=False,
                  effarea=None):
+        """
+        Define the instrument
+
+        :param name: string giving instrument name; for the MINBAR instruments, these are defined as MINBAR_INSTR_NAME.keys()
+        :param camera: qualifier for the instrument name; e.g. camera 1 or 2 for WFC or JEM-X. TODO decide how to deal with this for the PCA
+        :param path: local path specifier for observations from this instrument
+        :param label: two-character label code for this instrument
+        :param lightcurve: filename for the lightcurves
+        :param source_name: list of source names for this instrument, defaulting to the names from :class:`minbar.Sources`
+        :param spectrum: filename for the spectra
+        :param verbose: passed to :meth:`minbar.Instrument.verify_path`
+        :param effarea: effective area assumed for this instrument [cm^2]
+        """
 
         self.name = name
         if name in MINBAR_INSTR_LABEL.keys():
             # These are the known MINBAR instruments
             self.label = MINBAR_INSTR_LABEL[name]
-            self.instr = camera # copy of the instr row
+            self.sat = MINBAR_INSTR_SAT[name]
+            self.camera = camera
             if path is None:
                 path = MINBAR_INSTR_PATH[self.label]
 
@@ -2462,17 +2519,19 @@ class Instrument:
         """
         Method to display information about this object
         TODO: add PCU decode function to show active PCUs
+
         :return:
         """
 
         return """
 MINBAR instrument definition
 
-Name: {} ({})
+Name: {}/{} ({})
 Camera/detector flag: {}
 Data path: {}/{}/data
 Lightcurve(s): {}
-Spectra: {}""".format(self.name, self.label, self.instr[2:], MINBAR_ROOT, self.path, self.lightcurve, self.spectrum)
+Spectra: {}""".format(self.sat, self.name, self.label, 
+            self.camera or 'not specified', MINBAR_ROOT, self.path, self.lightcurve, self.spectrum)
 
 
     def filename_with_obsid(self, template, obsid, exclude=None):

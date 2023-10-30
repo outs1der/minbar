@@ -13,7 +13,7 @@ Classes and functions
    :members: __init__, get_burst_data, burstplot, get_lc, PRE, unique, __str__, has_error, is_error, get_error, get_error_name, create_distance_correction
 
 .. autoclass:: minbar.Observations
-   :members: __init__, good
+   :members: __init__, good, __str__, plot
 
 .. autoclass:: minbar.Sources
    :members: __init__, get_default_path, _get_field_labels, get, __getitem__, type, get_name_like, name_like, clear, get_F_Edd, get_distances, __str__
