@@ -18,3 +18,8 @@ Classes and functions
 .. autoclass:: minbar.Sources
    :members: __init__, get_default_path, _get_field_labels, get, __getitem__, type, get_name_like, name_like, clear, get_F_Edd, get_distances, __str__
 
+.. autoclass:: minbar.Observation
+   :members: __init__, plot, get_path, get_lc, analyse_persistent, analyse_burst
+
+.. autoclass:: minbar.Instrument
+   :members: __init__, filename_with_obsid, pca_lightcurve_filename, wfc_lightcurve_filename

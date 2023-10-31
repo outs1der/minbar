@@ -71,6 +71,8 @@ Below whe show an example of selecting all the observations from 4U
 
 The :class:`minbar.Sources` class is a little different as it is really just a wrapper for the underlying FITS table. Still, some of the methods as for the other two classes are available, including :meth:`minbar.Sources.name_like`.
 
+Note that available :class:`minbar.Sources` methods do not include `select_all` or `exclude_like`
+
 You can also select sources by type, e.g. ``C`` for ultracompact, or ``S``
 for sources that have shown a superburst, or combinations of the two
 
@@ -84,3 +86,42 @@ for sources that have shown a superburst, or combinations of the two
     ms.clear() # Clear selection
     ms.type('SC') # Select all ultracompacts that have shown a superburst
     ms['name'] # ... and show their names
+
+4. Analysing new X-ray observations
+-----------------------------------
+
+Below are some basic examples to analyse some (new?) X-ray data and search for bursts
+(under development)
+
+.. code-block:: python
+
+    import minbar
+
+    xte = minbar.Instrument('PCA') # Create an instrument definition
+    obs = minbar.Observation(None, xte, '4U 1636-536', '10088-01-07-02')
+
+    obs.plot()
+    print (obs.mjd, obs.rate)
+
+Can also define a new instrument for analysis of data from instruments not originally part of MINBAR
+
+.. code-block:: python
+
+    xmm = minbar.Instrument('XMM-Newton', 'xmm', 'XN', '2to7good.fits')
+    obs = minbar.Observation(None, xmm, '1RXS J180408.9-342058', '0741620101')
+    lc =obs.get_lc()
+
+    import matplotlib.pyplot as plt
+    plt.plot(lc['TIME'], lc['RATE'])
+    plt.show()
+
+And search for bursts
+
+.. code-block:: python
+
+    test = minbar.findburst(lc['TIME'], lc['RATE'], lc['ERROR'])
+    print(test)
+    [5.42058957e+08 5.42067368e+08 5.42075296e+08 5.42083081e+08
+     5.42090903e+08]
+
+These tools are currently under development

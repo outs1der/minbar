@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.18.0'
+__version__ = '1.19.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -1589,11 +1589,6 @@ class Observation:
     """
     This object is intended to allow all the possible actions you might have on an
     observation. You can create it from a minbar entry, or given an instrument, source name and obs ID
-
-    Example usage:
-    import minbar
-    o = minbar.Observations()
-    obs = minbar.Observation(o[14637])
     """
 
 
@@ -1604,10 +1599,16 @@ class Observation:
         It'd be nice to be able to create this just given the obs ID (for example), but
         then we'd need to keep a copy of the Observations object, which seems wasteful
 
-        :param obs_entry:
-        :param instr: 
-        :param source: 
-        :param obsid: 
+        Example usage:
+
+        | import minbar
+        | o = minbar.Observations()
+        | obs = minbar.Observation(o[14637])
+
+        :param obs_entry: single entry in the :class:`minbar.Observations` table, to create the object from (in which case the other parameters are not required)
+        :param instr: :class:`minbar.Instrument` object corresponding to the source instrument for these data
+        :param source: source name
+        :param obsid: observation ID
         """
 
         if obs_entry is not None:
@@ -1677,22 +1678,21 @@ class Observation:
             **kwargs):
         """
         Plot the observation lightcurve, reading it in first if need be.
-        Keyword arguments are passed on to the plot command (see the example
-        below).
+        Keyword arguments are passed on to the plot command.
+
+        Example usage, showing a combined plot of two subsequent observations
+        from 4U 1254-69:
+
+        | obs1=mb.Observation(o[17920])
+        | obs2=mb.Observation(o[17921], color='C0')
+        | fig = obs1.plot(show=False)
+        | obs2.plot(fig)
+
         :param figure: existing figure to add to, if multiple observations are
           to be plotted on the same axis (for example)
         :param show: display the figure immediately or not (latter case for 
           multiple observations to be plotted together)
         :return: plot object
-
-        Example usage, showing a combined plot of two subsequent observations
-        from 4U 1254-69:
-
-        obs1=mb.Observation(o[17920])
-        obs2=mb.Observation(o[17921], color='C0')
-        fig = obs1.plot(show=False)
-        obs2.plot(fig)
-
         """
         ylabel = 'Rate (count s$^{-1}$ cm$^{-2}$)'
 
@@ -1740,8 +1740,8 @@ class Observation:
         """
         Return the path for MINBAR observations, assuming you have them stored locally
 
-        :param split:
-        :return:
+        :param split: set to true to deal with RXTE/PCA observations that are divided between multiple directories
+        :return: path string (or array of paths) for observation data, if present
         """
 
         instr = self.instr.label
@@ -1792,8 +1792,6 @@ class Observation:
         """
         Return the lightcurve for a particular observation; this is a replacement for the IDL routine get_lc.pro
         This routine also populates the time, mjd_tt, mjd, rate, and error attributes for the observation
-        :param entry:
-        :return:
         """
 
         def pca_time_to_mjd_tt(time, header):
@@ -1920,6 +1918,27 @@ class Observation:
         self.mjd = self.mjd[i]
 
         return #lc
+
+    def analyse_persistent(self):
+        """
+        Function to analyse the persistent emission (lightcurve and spectrum) for a single
+        observation (not yet implemented)
+
+        :return:
+        """
+
+        pass
+
+    def analyse_burst(self, bursts):
+        """
+        Function to analyse the persistent emission (lightcurve and spectrum) for a single
+        observation (not yet implemented)
+
+        :param bursts: start times for burst(s) to analyse
+        :return:
+        """
+
+        pass
 
 
 class Sources:
@@ -2302,14 +2321,6 @@ class Instrument:
     Here's a generic instrument class which can be adapted and/or duplicated for different
     instruments. This class is kept pretty lean to avoid having to replicate lots of code
     Defines the properties of an instrument with data that we're going to analyse and add to MINBAR
-
-    :param name: name of the instrument
-    :param source_name: list of source names, to avoid having to load a Sources object
-
-    Example usage:
-
-    | import minbar
-    | jemx = minbar.Instrument('JEM-X', 'jemx', 'IJ')
     """
 
     def __init__(self, name, camera=None, path=None, label=None,
@@ -2320,6 +2331,11 @@ class Instrument:
                  effarea=None):
         """
         Define the instrument
+
+        Example usage:
+
+        | import minbar
+        | jemx = minbar.Instrument('JEM-X', 'jemx', 'IJ')
 
         :param name: string giving instrument name; for the MINBAR instruments, these are defined as MINBAR_INSTR_NAME.keys()
         :param camera: qualifier for the instrument name; e.g. camera 1 or 2 for WFC or JEM-X. TODO decide how to deal with this for the PCA
@@ -2537,10 +2553,15 @@ Spectra: {}""".format(self.sat, self.name, self.label,
     def filename_with_obsid(self, template, obsid, exclude=None):
         """
         Function to return a filename (possibly including path)
-        incorporating the obsservation ID, as used for RXTE and NuSTAR
+        incorporating the observation ID, as used for RXTE and NuSTAR
+        lightcurves.
         Also have the option of excluding a character from the obsid string
-        See pca_lightcurve_filename for example usage
-        :return:
+        See :meth:`minbar.Instrument.pca_lightcurve_filename` for example usage
+
+        :param template: template string for converting obsid to filename
+        :param obsid: observation ID (string)
+        :param exclude: character(s) to exclude from the obsid when forming the filename
+        :return: filename
         """
 
         if not ('{}' in template):
@@ -2555,7 +2576,9 @@ Spectra: {}""".format(self.sat, self.name, self.label,
     def pca_lightcurve_filename(self, obsid):
         """
         Function to return the lightcurve name for PCA observations
-        :return:
+
+        :param obsid: observation ID (string)
+        :return: filename
         """
 
         # return 'stdprod/xp{}_n1.lc.gz'.format(obsid.replace("-", ""))
@@ -2564,28 +2587,15 @@ Spectra: {}""".format(self.sat, self.name, self.label,
 
     def wfc_lightcurve_filename(self, name, obsid, camera):
         """
-        Function to return the lightcurve name for WFC observations
-        This convention is for the 2013 data
-        :return:
+        Function to return the lightcurve name for WFC observations.
+        This convention is for the 2013 data, not publicly available
+
+        :param name: source name following WFC convention (string)
+        :param obsid: observation ID (string)
+        :param camera: WFC camera (1 or 2)
+        :return: string giving data file name
         """
 
         return '{}_{}w{}_e1_31.lcv'.format(name, obsid, camera)
 
 
-    def analyse_persistent(self, src, obsid):
-        """
-        Function to analyse the persistent emission (lightcurve and spectrum) for a single
-        observation
-        :param src:
-        :param obsid:
-        :return:
-        """
-
-    def analyse_burst(self, bursts):
-        """
-        Function to analyse the persistent emission (lightcurve and spectrum) for a single
-        observation
-        :param src:
-        :param obsid:
-        :return:
-        """
