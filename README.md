@@ -22,11 +22,11 @@ Full documentation can be found at https://burst.sci.monash.edu/minbar/pydoc/ind
 * Start python and `import minbar`. 
 * Base classes are `Bursts`, `Observations`, and `Sources`; creating instances of each one will read the data from the corresponding table file
 
-Try the suggested example commands below; see the `online documentation <https://burst.sci.monash.edu/minbar/pydoc>`_ and the tutorial jupyter notebook; and also check `__init__.py` for instructions on usage
+Try the suggested example commands below; see the [online documentation](https://burst.sci.monash.edu/minbar/pydoc) and the tutorial jupyter notebook; and also check `__init__.py` for instructions on usage
 
 ### Example Usage ###
 
-The examples below originally utilised the IDL database files, and may not yet be implemented with the MRT tables.
+The examples below illustrate creating examples of the available `Bursts`, `Observations`, and `Sources` classes, and performing selections and data extractions from the tables.
 
 ```
 #!python
