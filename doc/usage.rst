@@ -32,7 +32,7 @@ Let's explore that below with some slightly more complex includes and excludes
     mb.exclude_like('1636') # Exclude source from selection
     mb.exclude_like('1826') # Now two sources are excluded
 
-Finally, here's some analysis which involves working with the fluxes, and
+Here's some analysis which involves working with the fluxes, and
 estimating peak luminosity from the bolometric peak flux (table attribute
 ``bpflux``)
 
@@ -48,6 +48,21 @@ estimating peak luminosity from the bolometric peak flux (table attribute
     pca_luminosity = luminosity[pca] # Luminosity of PCA bursts
 
 A complete list of the :class:`minbar.Bursts` `table attributes <https://burst.sci.monash.edu/static/html/columns.html#bursts>`_, along with those for the :class:`Observations` and :class:`Sources` tables, can be found at the alternate web interface for the MINBAR data, `http://burst.sci.monash.edu <http://burst.sci.monash.edu>`_
+
+Time-resolved spectroscopy for most of the *RXTE*/PCA and *BeppoSAX*/WFC bursts is available via the website, but can be downloaded using the :meth:`minbar.Bursts.get_burst_data` method. The :meth:`minbar.Bursts.burstplot` method can make nice plots of the downloaded data, or will just download the data on request as needed:
+
+.. code-block:: python
+
+    print (mb[2258]) # show the data table row for the 2nd burst from obsID 10088-01-07-02
+    data = mb.get_burst_data(2258) # download the time-resolved spectroscopy table
+    data.columns # show the available columns
+    mb.burstplot(bdata=data) # plot those data, default is flux only
+    mb.burstplot(2258, param=['flux','kT','rad']) # download and plot in one step, with extra parameters
+
+The result of the last command is shown below; from top to bottom, bolometric burst flux, blackbody temperature, and radius. Use the ``show=False`` option to :meth:`minbar.Bursts.burstplot` to add your own annotation before calling ``plt.show()``.
+
+.. image:: images/burst_burstplot_2258.png
+  :alt: Time-resolved spectroscopic analysis results of burst #2258 from 4U 1636-536, generated with the :meth:`minbar.Bursts.burstplot` method
 
 2. Working with observations
 ----------------------------
@@ -65,6 +80,20 @@ Below whe show an example of selecting all the observations from 4U
     mo.name_like('1636') # Same source selection options as for burst database
     time = mo['tstart'] # And fields are accessed in the same way
     print (mo.field_labels.keys()) # See which fields are available
+
+We can also plot the long-term history of the source using the plot
+method, first selecting only the "good" observations (non-zero fluxes,
+principally)
+
+.. code-block:: python
+
+    mo.good()
+    mo.plot()
+
+The result is below
+
+.. image:: images/obs_plot_1636.png
+  :alt: Long-term flux history of 4U 1636-536 from MINBAR data, generated with the :meth:`minbar.Observations.plot` method
 
 3. Working with sources
 ----------------------------
