@@ -11,6 +11,8 @@ Provides facilities for reading MINBAR ASCII data tables, available via the onli
 * Includes code, under development, to extend the MINBAR sample
 * Can also read in IDL database files (not  publicly available), from which the ASCII tables are derived
 
+Full documentation can be found at https://burst.sci.monash.edu/minbar/pydoc/index.html
+
 ### Getting Started ###
 
 * Clone/download the repository to your local machine
@@ -19,7 +21,8 @@ Provides facilities for reading MINBAR ASCII data tables, available via the onli
 * Copy the MINBAR table files `minbar.txt`, `minbar-obs.txt`, and `minbar_sources.fits` (rename the downloaded `minbar_sources_vXX.fits` to `minbar_sources.fits`) into the data directory, or softlink them to the respective locations.
 * Start python and `import minbar`. 
 * Base classes are `Bursts`, `Observations`, and `Sources`; creating instances of each one will read the data from the corresponding table file
-* Try the suggested example commands below; see the tutorial jupyter notebook; and also check `__init__.py` for instructions on usage
+
+Try the suggested example commands below; see the `online documentation <https://burst.sci.monash.edu/minbar/pydoc>`_ and the tutorial jupyter notebook; and also check `__init__.py` for instructions on usage
 
 ### Example Usage ###
 
@@ -60,37 +63,5 @@ ra = ms['ra_obj'] # Right ascension for all sources
 ms.name_like('1636') # Select a source using part of its name
 ra = ms['ra_obj'] # Right ascension for selected source only
 ms.clear() # Clear selection
-```
-
-Note that Sources() methods do not include `select_all()` or `exclude_like()`
-
-Below are some basic examples to analyse some (new?) X-ray data and search for bursts
-(under development)
-
-```
-import minbar
-
-xte = minbar.Instrument('PCA') # Create an instrument definition
-obs = minbar.Observation(None, xte, '4U 1636-536', '10088-01-07-02')
-
-obs.plot()
-print (obs.mjd, obs.rate)
-```
-
-Can also define a new instrument for analysis of data from instruments not originally part of MINBAR
-
-```
-xmm = minbar.Instrument('XMM-Newton', 'xmm', 'XN', '2to7good.fits')
-obs = minbar.Observation(None, xmm, '1RXS J180408.9-342058', '0741620101')
-lc =obs.get_lc()
-
-import matplotlib.pyplot as plt
-plt.plot(lc['TIME'], lc['RATE'])
-plt.show()
-
-test = minbar.findburst(lc['TIME'], lc['RATE'], lc['ERROR'])
-print(test)
-[5.42058957e+08 5.42067368e+08 5.42075296e+08 5.42083081e+08
- 5.42090903e+08]
 ```
 

@@ -4,10 +4,15 @@
 #   https://packaging.python.org/tutorials/packaging-projects/
 
 import setuptools
-import glob
+import glob, re
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
+
+def get_property(prop, project):
+    result = re.search(r'{}\s*=\s*[\'"]([^\'"]*)[\'"]'.format(prop),
+                       open(project + '/__init__.py').read())
+    return result.group(1)
 
 
 def get_version():
@@ -17,6 +22,7 @@ def get_version():
     import minbar
     return minbar.__version__
 
+package_name='minbar'
 
 setuptools.setup(
     # Needed to silence warnings (and to be a worthwhile package)
