@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.19.0'
+__version__ = '1.19.1'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -55,7 +55,7 @@ DATE = datetime.now()
 # This is NOT the directory where the table data files are found
 # LOCAL_DATA flag is now determined dynamically as part of minbar.__init__
 
-MINBAR_ROOT = '/Users/Shared/burst/minbar'
+MINBAR_ROOT = '/home/burst/minbar'
 # LOCAL_DATA = True
 MINBAR_URL = 'https://burst.sci.monash.edu/'
 
@@ -1889,7 +1889,8 @@ class Observation:
         elif self.instr.label == 'IJ':
             # JEM-X can have multiple lightcurves, but that's not implemented
             # yet. Instead we pick one of them for the JEM-X1 or -X2 here
-            filename = self.instr.lightcurve[int(self.instr.instr[2:])-1]
+            # filename = self.instr.lightcurve[int(self.instr.instr[2:])-1]
+            filename = self.instr.lightcurve[int(self.instr.camera)-1]
         else:
             # logger.warning("other instruments not yet implemented")
             filename = self.instr.lightcurve
