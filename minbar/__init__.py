@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.19.1'
+__version__ = '1.19.2'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -55,7 +55,7 @@ DATE = datetime.now()
 # This is NOT the directory where the table data files are found
 # LOCAL_DATA flag is now determined dynamically as part of minbar.__init__
 
-MINBAR_ROOT = '/home/burst/minbar'
+MINBAR_ROOT = '/Users/Shared/burst/minbar'
 # LOCAL_DATA = True
 MINBAR_URL = 'https://burst.sci.monash.edu/'
 
@@ -1862,7 +1862,10 @@ class Observation:
                 if timesys == 'TT':
                     mjd = mjd.utc
 
-                return time, rate, error, timesys, timeunit, mjd, None
+                # no GTI information for JEM-X, but we assume it's
+                # uninterrupted
+
+                return time, rate, error, timesys, timeunit, mjd, Time([min(mjd),max(mjd)])
 
         path = self.get_path()
         if path is None:
