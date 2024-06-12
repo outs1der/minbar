@@ -2,6 +2,7 @@
 
 import numpy as np
 from scipy.signal import correlate
+from scipy.optimize import curve_fit
 import scipy.special
 import os, sys
 import pickle
@@ -199,11 +200,12 @@ def burst_template(x, a):
     Generates a template burst within a time series given by the first
     variable passed, with the specified profile. Includes calculation of
     partial derivatives for use with curvefit. Parameters are:
-    a[0] = baseline count rate
-    a[1] = start time of burst
-    a[2] = rise time of burst
-    a[3] = peak intensity of burst
-    a[4] = exponential decay time
+
+    | a[0] = baseline count rate
+    | a[1] = start time of burst
+    | a[2] = rise time of burst
+    | a[3] = peak intensity of burst
+    | a[4] = exponential decay time
 
     Copied from jemx/search-new.pro, 23.10.14
     """
@@ -248,11 +250,95 @@ def burst_template(x, a):
     return f, pder
 
 
+def burst_template_pow(x, base, start, rise, peak_rate, peak_dur, gamma):
+    """
+    Generates a model burst within a time series given by the first
+    variable passed, with the specified profile. This version replaces
+    the exponential decay in the tail with a power law
+
+    Doesn't quite work yet - dkg 2024 Jun
+
+    Copied from burst_template 12.6.2024
+
+    :param x: time bins [s]
+    :param base: baseline count rate (background), counts/s or counts/cm^2/s
+    :param start: start time of burst, same units as x
+    :param rise: rise time of burst, same units as x
+    :param peak_rate: peak intensity of burst, counts/s or counts/cm^2/s
+    :param peak_dur: duration of peak intensity, same units as x
+    :param gamma: power law index for decay portion
+
+    :return: array with burst model evaluated at x values
+    """
+
+    n = len(x)
+    dt = dt_nonzero(x)
+    f = np.zeros(n)
+    rise = max([dt, rise])  # Meaningless to have a rise smaller than this
+    peak_dur = max([dt, peak_dur])
+
+    g = np.where(np.logical_and(x >= start, x < start + rise))[0]  # Rise segment
+    if len(g) > 0:
+        f[g] = peak_rate * (x[g] - start) / rise
+
+    g = np.where(np.logical_and(x >= start + rise, x <= start + rise + peak_dur))[0]  # Peak segment
+    if len(g) > 0:
+        f[g] = peak_rate
+
+    g = np.where(x > start + rise + peak_dur)[0]  # Tail segment
+    if len(g) > 0:
+        # with the convention below, gamma is positive, for consistency with edt
+        f[g] = peak_rate * (dt/(x[g] - (start + rise + peak_dur)))**gamma
+
+    return f+base #, pder
+
+
+def burst_template_flat(x, base, start, rise, peak_rate, peak_dur, edt):
+    """
+    Generates a model burst within a time series given by the first
+    variable passed, with the specified profile. Rather than the sharp peak of
+    burst_template, this profile has a peak that lasts for at least one bin,
+    likely better suited to realistic bursts and particularly PRE bursts
+
+    Copied from burst_template 12.6.2024
+
+    :param x: time bins [s]
+    :param base: baseline count rate (background), counts/s or counts/cm^2/s
+    :param start: start time of burst, same units as x
+    :param rise: rise time of burst, same units as x
+    :param peak_rate: peak intensity of burst, counts/s or counts/cm^2/s
+    :param peak_dur: duration of peak intensity, same units as x
+    :param edt: exponential decay time, same units as x
+
+    :return: array with burst model evaluated at x values
+    """
+
+    n = len(x)
+    dt = dt_nonzero(x)
+    f = np.zeros(n)
+    rise = max([dt, rise])  # Meaningless to have a rise smaller than this
+    peak_dur = max([dt, peak_dur])
+
+    g = np.where(np.logical_and(x >= start, x < start + rise))[0]  # Rise segment
+    if len(g) > 0:
+        f[g] = peak_rate * (x[g] - start) / rise
+
+    g = np.where(np.logical_and(x >= start + rise, x < start + rise + peak_dur))[0]  # Peak segment
+    if len(g) > 0:
+        f[g] = peak_rate
+
+    g = np.where(x >= start + rise + peak_dur)[0]  # Tail segment
+    if len(g) > 0:
+        f[g] = peak_rate * np.exp(-(x[g] - (start + rise + peak_dur)) / edt)
+
+    return f + base  # , pder
+
+
 def findburst(_time, _rate, _error=None, tunit=None,
-    rise=None, edt=20., refine=False, fit=False,
+    rise=None, edt=20., refine=False, fit=False, fit_func=burst_template_flat,
     # sig=sig, param=param, error=sigma, resid=resid,
     plot=False, # xrange=xrange,
-    min_burst_sep=3., sigthresh=5., mjdref=0.0, dbg=False):
+    min_burst_sep=3., sigthresh=5., dbg=False):
     """
     $Id: findburst.pro,v 1.1 2011/06/29 12:54:00 duncan Exp duncan $
 
@@ -261,51 +347,57 @@ def findburst(_time, _rate, _error=None, tunit=None,
 
     This version moved from minbar/jemx, and simplified 23.10.2014
 
-    Input parameters:
-      time [days]
-      rate & error [counts/sec]
-      rise [sec] (optional) burst rise time
-      edt [sec] (optional) burst timescale
-    Outputs:
-      <t_cand> list of candidate burst times [MJD]
-      sig estimated significance of burst detection
-      param list of burst parameters: peak rate [count/s], base rate [count/s],
-              fitted start time [MJD], rise [s], fitted peak rate [count/s],
-              exponential decay time [s]
-      sigma error on fit parameters (from curvefit)
-      resid residual lightcurve, after all detected bursts have been subtracted
-              out
+    :param _time: array with burst lightcurve time bins
+    :param _rate: array with burst rate [counts/sec, or counts/sec/cm^2]
+    :param _error: array with error on burst rate
+    :param tunit: string giving time units, 's' or 'd'
+    :param rise: (optional) template burst rise time [sec]
+    :param edt: (optional) template burst exponentional decay timescale [sec]
+    :param refine: boolean, set to True to 'refine' the burst time based on a fit (not yet implemented)
+    :param fit: boolean, set to True to also fit the burst profile
+    :param fit_func: function to fit the burst profiles
+    :param min_burst_sep: minimum burst separation [min]
+    :param sigthresh: significance threshold for burst detection (no. of sigmas)
+    :param dbg: boolean, set to True to display some diagnostic information
+
+    :return: <t_cand> list of candidate burst times [same units as _time], and (if fit=True) the fit parameters and sigmas
+
+    | sig estimated significance of burst detection
+    | param list of burst parameters: peak rate [count/s], base rate [count/s],
+    |         fitted start time [MJD], rise [s], fitted peak rate [count/s],
+    |         exponential decay time [s]
+    | sigma error on fit parameters (from curvefit)
 
     Example usage:
 
-    import minbar
-    from astropy.io import fits
-
-    file = '../xmm/data/1RXSJ180408.9-342058/0741620101/2to7good.fits'
-    hdul = fits.open(file)
-    data = hdul[1].data
-    test = minbar.findburst(data['TIME'], data['RATE'], data['ERROR'])
-    print(test)
-    [5.42058957e+08 5.42067368e+08 5.42075296e+08 5.42083081e+08 5.42090903e+08]
+    | import minbar
+    | from astropy.io import fits
+    |
+    | file = '../xmm/data/1RXSJ180408.9-342058/0741620101/2to7good.fits'
+    | hdul = fits.open(file)
+    | data = hdul[1].data
+    | test = minbar.findburst(data['TIME'], data['RATE'], data['ERROR'])
+    | print(test)
+    | [5.42058957e+08 5.42067368e+08 5.42075296e+08 5.42083081e+08 5.42090903e+08]
 
     Routines called:
-      burst_template
-      gtiseg
-      curvefit
-      dt_nozero
+
+    | burst_template_flat
+    | gtiseg
+    | dt_nozero
     """
 
     # Some parameters passed to the IDL routine via common statements
 #  common findburst,sigthresh,min_burst_sep
 #  common jemx,mjdref    ; MJDREF not currently used
 
-    sn='findburst'
+    pre_burst = 32.0     # interval prior to the burst to include in the fit
 
     if rise == None:
         rise=edt/4.     # Default burst rise [sec]
 
-    if refine:
-        print("{}: ** ERROR ** refining of template not yet implemented".format(sn))
+    if refine: # or fit:
+        minbar.logger.error("refining/fitting of template not yet fully implemented")
         return None
 
 # Make copies of the input arrays to avoid unintentionally modifying them
@@ -319,7 +411,7 @@ def findburst(_time, _rate, _error=None, tunit=None,
 # can be estimated from the lightcurve, to make the code easier to use
 
     if _error is None:
-        print("{}: ** WARNING ** errors are required".format(sn))
+        minbar.logger.error("errors are required")
         return None
     else:
         error=_error
@@ -328,7 +420,7 @@ def findburst(_time, _rate, _error=None, tunit=None,
 
     fin = np.where(np.isfinite(rate) & np.isfinite(error))[0]
     if len(fin) < n:
-        print("{}: ** WARNING ** non-finite rate measurements, excising from analysis".format(sn))
+        minbar.logger.warning("non-finite rate measurements, excising from analysis")
         time = time[fin]
         rate = rate[fin]
         error = error[fin]
@@ -342,49 +434,55 @@ def findburst(_time, _rate, _error=None, tunit=None,
             tunit='s'
         else:
             tunit='d'
-        print("{}: ** WARNING ** setting tunit='{}', set explicitly if incorrect".format(sn,tunit))
+        minbar.logger.warning("setting tunit='{}', set explicitly if incorrect".format(tunit))
     if tunit == 's':
         sd=1.0
     elif tunit == 'd':
         sd=86400.0
     else:
-        stop,'** ERROR ** unrecognised time unit'
+        minbar.logger.error('unrecognised time unit')
+        return
     md=sd/60.
 
 # Define the fitting window here
 
-    pb=32.0/sd            # interval prior to the burst to include in the
+    pb=pre_burst/sd            # interval prior to the burst to include in the
                           #   fitting window
     fwin = np.array([-pb,max([min_burst_sep/md,edt/sd])-pb])
     fwin_ind = np.where((time-time[0] > fwin[0]) & (time-time[0] < fwin[1]))[0]
     if dbg:
         print("{}: defined fitting window as {} relative to the burst time".format(
-            sn, fwin*sd))
+            'findburst', fwin*sd))
 
 # Some screening here. This gap selection used for the April and June 2011
-# searches, but subsequently Jerome suggested it was too restrictive...
+# searches [of JEM-X data?], but subsequently Jerome suggested it was too restrictive...
 # although in actual fact it only results in one exception
 
     g = np.where((dt*sd >= 16.) & (rate > 4000.))[0]
     if len(g) > 0:
-        print ("{}: ** WARNING ** exception in lightcurve".format(sn))
+        minbar.logger.error ("exception in lightcurve")
         return None
 
 # First define the burst template
 
-    m=np.median(rate)
-    p=max(rate)-m
+    m = np.median(rate)
+    p = max(rate)-m
 #  t0=0.5*(max(time)+min(time)) ; Trial burst is in the middle of the segment
     # t0=time[int(n/2)]
     # trial, pder = burst_template(time,[m,t0,rise/sd,p,edt/sd])
     t0 = time[0]+pb
-    trial, pder = burst_template(time[fwin_ind],[m,t0,rise/sd,p,edt/sd])
-    if dbg:
+    # trial, pder = burst_template(time[fwin_ind],[m,t0,rise/sd,p,edt/sd])
+    # set peak duration to the same value as the rise
+    trial = burst_template_flat(time[fwin_ind], m, t0, rise/sd, p, rise/sd, edt/sd)
+    # we store the template values as the guess for curve_fit
+    # TODO modify these guesses etc. based on the specific form of the fit function
+    p0 = [m, t0, rise/sd, p, rise/sd, edt/sd]
+    if dbg & (not fit):
         plt.plot(time[fwin_ind],trial)
 
 # Now cross-correlate the template, sliding the window over the entire lightcurve
 
-    c=correlate(rate, trial, mode='same')
+    c = correlate(rate, trial, mode='same')
     # plt.plot(time,c)
 
 # Estimate the significance here by shuffling the rate
@@ -419,8 +517,8 @@ def findburst(_time, _rate, _error=None, tunit=None,
         # No bursts
         return None
 
-# Define an array giving the start and end indices for each region
-# The 5% padding below avoids issues with rounding errors
+    # Define an array giving the start and end indices for each region
+    # The 5% padding below avoids issues with rounding errors
 
     # print (1.05*min_burst_sep/md,min_burst_sep)
     t_cand_ind=gtiseg(time[cexc], maxgap=1.05*min_burst_sep/md)#,indices=t_cand_ind)
@@ -442,43 +540,60 @@ def findburst(_time, _rate, _error=None, tunit=None,
         # exceeding the search threshold, identified in the previous step
 
         ncand=len(t_cand_ind)
-        param = np.zeros((ncand,6))
-        sig = np.zeros(ncand)
+        param = np.zeros((ncand,8)) # fit parameters plus significance & maximum rate
         result = -1     # originally the fits for each burst; not currently used
-        sigma = param.copy()
-        weights = 1./error^2
+        sigma = np.zeros((ncand,7))
         resid = rate.copy()
         for i in range(ncand):
 
-# Calculate peak intensity in the window over which the significance
-# exceeds the threshold
-# Initial estimate of t_cand is probably sufficiently good
+            # Calculate peak intensity in the window over which the significance
+            # exceeds the threshold
+            # Initial estimate of t_cand is probably sufficiently good
 
             ipmax = np.argmax(rate[t_cand_ind[i,0]:t_cand_ind[i,1]])+t_cand_ind[i,0]
             # p=max(rate[t_cand_ind[0,i]:t_cand_ind[1,i]],ipmax)
             # ipmax += t_cand_ind[0,i]      # note ipmax is a pointer into time, not win
             # pe=error[ipmax]
-            p, pe = rate[ipmax], error[ipmax]
+            peak_rate, peak_rate_error = rate[ipmax], error[ipmax] # store the maximum rate and error
             # t_cand[i]=time[ipmax]
-            sig[i]=max(csig[t_cand_ind[0,i]:t_cand_ind[1,i]])
+            sig = max(csig[t_cand_ind[i,0]:t_cand_ind[i,1]])
 
-# Now determine the window over which to do the fitting. This has a
-# minimum size of fwin
+            # Now determine the window over which to do the fitting. This has a
+            # minimum size of fwin
 
-            win = np.where(time-t_cand[i] >= min([fwin[0],time[t_cand_ind[0,i]]-t_cand[i]])
-              & time-t_cand[i] < max([fwin[1],time[t_cand_ind[1,i]]-t_cand[i]]))[0]
+            win = np.where((time-t_cand[i] >= min([fwin[0],time[t_cand_ind[i,0]]-t_cand[i]]))
+                & (time-t_cand[i] < max([fwin[1],time[t_cand_ind[i,1]]-t_cand[i]])))[0]
 
 # Start the fitting loop
 
-            _param=[m,t_cand[i],rise/sd,p,edt/sd]
+            # assemble the initial guess
+            # _param=[m,t_cand[i],rise/sd,p,rise/sd,edt/sd]
+            p0[1] = t_cand[i]
 
-            if len(win) > len(_param):
+            # if len(win) > len(_param):
+            if len(win) > 6:
 
-# try to do a fit, now just within a window surrounding the burst
+                # try to do a fit, now just within a window surrounding the burst
+                # originally this code used IDL's curvefit, replaced with scipy.optimize's curve_fit, see
+                # https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.curve_fit.html
 
-                _param=[_param[0],t_cand[i],_param[2:4]]
-                _result=curvefit(time[win],rate[win],weights[win],_param,_sigma,
-                    function_name='burst_template',iter=1000,status=_s)
+                # check for zero errors, and fill with the median, if any are present
+                _error = error[win]
+                zerr = _error <= 0.
+                if np.any(zerr):
+                    _error[zerr] = np.median(_error[~zerr])
+
+                # previously we'd set the initial parameters, but now we guide the fit with the
+                # bounds parameter
+                # _param=[_param[0],t_cand[i],_param[2:]]
+                # _result=curvefit(time[win],rate[win],weights[win],_param,_sigma,
+                #     function_name='burst_template',iter=1000,status=_s)
+                # burst_template_flat parameters are base, start, rise, peak_rate, peak_dur, edt
+                _param, pcov, idict, mesg, _s = curve_fit(fit_func, time[win], rate[win], sigma=_error,
+                    absolute_sigma=True, full_output=True, p0=p0,
+                    bounds=([0,   t_cand[i]-edt/sd, 0,      0.9*(p-m),                 0,      0],
+                            [2*m, t_cand[i]+edt/sd, edt/sd, peak_rate+3*peak_rate_error, edt/sd, 100/sd]))
+                _sigma = np.sqrt(np.diag(pcov))
 
 # if dbg then begin
 #   plot,time[win],rate[win]
@@ -494,8 +609,8 @@ def findburst(_time, _rate, _error=None, tunit=None,
 # This will also require refining the significance threshold exceedance array,
 # AND omitting the segments to which a burst has already been fitted
 
-            if refine & (ncand == 1) & (_s == 0) & (_param[4] < 1000./sd):
-                trial2 = burst_template(time,[_param[0],t0,_param[2:5]])
+            if refine & (ncand == 1) & (_s in (1,2,3,4)) & (_param[4] < 1000./sd):
+                trial2 = fit_func(time,[_param[0],t0,_param[2:5]])
 
 
                 c2 = correlate(rate, trial2, mode='same')
@@ -537,7 +652,7 @@ def findburst(_time, _rate, _error=None, tunit=None,
 #;          function_name='burst_template',iter=1000)
                     if len(win) > len(_param):
                         _result=curvefit(time[win],rate[win],weights[win],_param,_sigma,
-                                         function_name='burst_template',iter=1000,status=_s)
+                                         function_name='fit_func',iter=1000,status=_s)
 # if dbg then begin
 #   plot,time[win],rate[win]
 #   oplot,time[win],_result,color='00ff00'x
@@ -549,24 +664,24 @@ def findburst(_time, _rate, _error=None, tunit=None,
 # If the fit has failed, or some of the uncertainties are non-finite, then
 # the results can't be trusted; so blank them out
 
-        if (_s > 0) or (min(finite(_sigma)) == 0) or (_param[4] < 0.0):
-            _param=[0.0,t_cand[ncand-1],fltarr(3)]
-            _sigma=fltarr(5)
+            if (_s not in (1,2,3,4)) or (np.any(~np.isfinite(_sigma))) or (_param[4] < 0.0):
+                _param=np.zeros(6)
+                _param[1]=t_cand[ncand-1]
+                _sigma=np.zeros(6)
 
-# Assemble parameter, result list
+            # Assemble parameter, result list
 
-        sigma[:,i]=[pe,_sigma*[1.,1.,sd,1.,sd]]
-# if dbg then begin
-#   plot,time,rate
+            param[i,:]=np.concatenate(([peak_rate],       _param*[1.,1.,sd,1.,sd,sd], [sig]))
+            sigma[i,:]=np.concatenate(([peak_rate_error], _sigma*[1.,1.,sd,1.,sd,sd]))
+
+            if dbg:
+                # plot the burst data versus the model
+                # TODO might want to save this plot as a matter of course for each burst
+                plt.plot(time[win],rate[win],'b-')
+                plt.plot(time[win], fit_func(time[win], *_param), 'g--')
 #   if ncexc gt 0 then oplot,[time[cexc]],[rate[cexc]],color='00ff00'x
 #   a=get_kbrd(1)
 # endif
-
-# Subtract off the model from the residual
-
-        burst_template,time[win],[0.0,_param[1:4]],model
-        resid[win]=resid[win]-model
-
 
 # if dbg then begin
 #   plot,time,rate
@@ -577,11 +692,7 @@ def findburst(_time, _rate, _error=None, tunit=None,
 
 # if dbg then stop
 
-        if param[0] == -1:
-            param=p
-                        # If we don't fit, we only return the burst peak
-
-    return t_cand
+    return t_cand, param, sigma
 
 
 def generate_bins(x_b, x_o, nperbin=10, log=True, x_lim=None, x_add=None):
@@ -1327,4 +1438,173 @@ def binplot(bins, rate, rate_err, panel=None, pbins=None,
         plt.xscale('log')
         plt.yscale('log')
     plt.ylabel(ylabel)
+
+def reduce(obs, to_level=None, clean=False, clobber=False, dryrun=False):
+    '''
+    Routine to reduce & analyse a given observation. Will check for different components
+    (lightcurve, spectrum, analysis results) and if they are not there, regenerate them.
+    This behaviour is moderated by the to_level option, with the descriptions below (see
+    also the Observation class):
+
+    | level = 0 # no analysis products (known to be) present
+    | level = 1 # raw analysis/reduction steps have been completed but no lightcurves or spectra yet created
+    | level = 2 # lightcurve(s) are available
+    | level = 3 # burst search has been completed and any burst data has been generated
+    | level = 4 # time-resolved spectroscopy is available
+    | level = 5 # persistent spectra are available
+    | level = 9 # defined from a MINBAR observation entry, may not be any raw data available
+
+    Calls analyse_persistent, and the burst search; if any bursts are found, will also
+    call analyse_burst
+
+    :param obs: target observation to analyse (Observation object)
+    :param to_level: target observation level to reach
+    :param clean: boolean, set to True to redo all steps, or if False, will only do incremental analysis
+    :param clobber: boolean, set to True to overwrite previous analyses files
+    :param dryrun: if True, won't create any files, will just write what's going to happen
+
+    :return:
+    '''
+
+    from datetime import date
+
+    header_default = '''MINBAR DR1+ data file
+Created {} with the pyminbar package, see https://github.com/outs1der/minbar
+'''.format(date.today())
+    burst_file = 'bursts.lis'
+    burst_dir = 'burst{}'
+    burst_win = (-50, 206) # [s] time window to extract burst lightcurve over
+    burst_lc_file = 'burst.lc'
+
+    assert type(obs) == minbar.Observation
+    levels = (0, 1, 2, 3, 4, 5, 9)
+
+    if to_level is not None:
+        if obs.level >= to_level:
+            minbar.logger.warning('analysis already complete to level {}, nothing to do'.format(obs.level))
+            return True
+        if to_level not in levels:
+            minbar.logger.error('no such processing level {}'.format(to_level))
+            return False
+
+    path = obs.get_path()
+    minbar.logger.info('Reducing {} observation #{} in directory {}...'.format(obs.instr.name, obs.obsid, path))
+    for level in levels[(1-int(clean))*(obs.level+1):levels.index(to_level)+1]:
+        # loop over the levels here
+        minbar.logger.info('Level {} processing...'.format(level))
+
+        # For Python 3.10 you could use the match-case statement; see e.g.
+        # https://stackoverflow.com/questions/11479816/what-is-the-python-equivalent-for-a-case-switch-statement
+        if level == 1:
+            # perform raw analysis/reduction steps have been completed but no lightcurves or spectra yet created
+            pass
+        elif level == 2:
+            # extract lightcurve(s)
+            pass
+        elif level == 3:
+            #################################################################
+            # run burst search and generate subdirectories etc.
+            #
+            # runs the burst file and creates burst.lis in the observation directory,
+            # and then for each detected burst a subdirectory burst[n] with a lightcurve file
+            # around the burst time
+
+            if obs.time is None:
+                obs.get_lc()
+
+            bursts, param, sigma = findburst(obs.mjd.value, obs.rate.value, obs.error.value, tunit='d', fit=True)
+
+            time_unit = '{} {}'.format(obs.mjd.format.upper(), obs.mjd.scale.upper())
+            # verify step here
+            if len(bursts) == 0:
+                logger.info('no bursts detected, nothing more to do')
+            else:
+                print ('Got burst(s) at {}, triggering data extraction'.format(bursts))
+                # useful diagnostic plot to show burst candidates, could have a loop here that would
+                # allow the user to verify the events
+                fig = obs.plot(show=False)
+                plt.plot(bursts, np.full(len(bursts), max(obs.rate)*1.05),'|r')
+                plt.show()
+
+                # write the burst file
+                obs.burst_file = burst_file
+                _path_and_file = '/'.join((path,obs.burst_file))
+                obs.burst_cand = bursts # can't use bursts attribute, as that's just for MINBAR bursts
+                if os.path.isfile(_path_and_file) & (not clobber):
+                    minbar.logger.warning('{} exists and clobber is set to False, skipping burst file write'.format(obs.burst_file))
+                    minbar.logger.info('Level {} processing interrupted, need to reconcile burst search results and existing file'.format(level))
+                    break
+                else:
+                    f = open(_path_and_file, 'w')
+                    np.savetxt(f, bursts, fmt='%11.5f',
+                               header=header_default+'''File {}
+
+Output of burst search on {} observation {}
+
+Created with minbar.reduce v{}
+
+Burst times are in {}'''.format(obs.burst_file, obs.instr.name, obs.obsid, minbar.__version__, time_unit))
+                    f.close()
+
+                for i, burst in enumerate(bursts):
+                    minbar.logger.info('processing burst #{}, {} {}'.format(i+1, obs.mjd.format.upper(), burst))
+                    _burst_path = '/'.join((path,burst_dir.format(i+1)))
+                    os.mkdir(_burst_path)
+                    sel = (obs.mjd.value > burst+burst_win[0]/86400) & (obs.mjd.value < burst+burst_win[1]/86400)
+                    _path_and_file = '/'.join((_burst_path,burst_lc_file))
+                    if os.path.exists(_path_and_file) & (not clobber):
+                        minbar.logger.warning('{} exists and clobber is set to False, skipping burst lightcurve file write'.format(burst_lc_file))
+                        minbar.logger.info('Level {} processing interrupted, need to reconcile burst search results and existing file'.format(level))
+                        break
+                    else:
+                        f = open('/'.join((_burst_path,burst_lc_file)), 'w')
+                        np.savetxt(f, np.column_stack([(obs.mjd.value[sel]-burst)*86400, obs.rate.value[sel], obs.error.value[sel]]),
+                                   fmt='%9.5f', header=header_default+'''File {}
+
+Extracted from {} observation {}, all-observation lightcurve
+  {}
+  
+Rate is NOT background subtracted, assumed effective area is {}
+
+Columns:
+  Time (s relative to {} {:.5f}), rate & error (per {})'''.format(
+                            burst_lc_file, obs.instr.name, obs.obsid, obs.file, obs.instr.effarea, time_unit, burst, (1./obs.rate[0]).unit))
+                        f.close()
+        elif level == 4:
+            # extract time-resolved spectroscopy
+            pass
+        elif level == 5:
+            # extract persistent spectra
+            pass
+        elif level == 9:
+            # write to the database?
+            pass
+
+        minbar.logger.info('... level {} processing complete.'.format(level))
+
+    minbar.logger.info('...reduce step complete')
+    return True # assuming no errors
+
+
+def analyse_persistent(self):
+    """
+    Function to analyse the persistent emission (lightcurve and spectrum) for a single
+    observation (not yet implemented)
+
+    :return:
+    """
+
+    pass
+
+def analyse_burst(self, bursts):
+    """
+    Function to analyse the persistent emission (lightcurve and spectrum) for a single
+    observation (not yet implemented)
+
+    :param bursts: start times for burst(s) to analyse
+    :return:
+    """
+
+    pass
+
 
