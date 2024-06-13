@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.20.0'
+__version__ = '1.20.1'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -1678,7 +1678,7 @@ class Observation:
         # Define parameters for the lightcurve; later this might be a class
         # The lightcurve might also not be available, so don't force it to be read in now
 
-        self.time = None
+        self.time, self.mjd = None, None
         self.rate = None
         self.error = None
 
@@ -1864,25 +1864,28 @@ class Observation:
 
         def read_fits_lc(file, effarea = 1.*u.cm**2):
             """
-            Utility routine to read in the important bits of a lightcurve
+            Utility routine to read in the important bits of a lightcurve.
+            The header is read in, but not returned; we return the key bits of information
 
             :param file: name of file to read in
             :param effarea: effective area adopted to convert count rate to
               counts/cm^2/s (standard for MINBAR lightcurves)
 
-            :return: time, rate, error, timesys, timeunit, mjd, gti
+            :return: time, timepixr, timezero, rate, error, timesys, timeunit, mjd, gti
             """
 
             # print (path+'/'+filename)
             if not os.path.isfile(file):
                 logger.error('lightcurve file not found\n  {}'.format(file))
-                return None, None, None, None, None, None, None
+                return None, None, None, None, None, None, None, None, None
 
             lcfile = fits.open(file)
 
             # For XTE files, convention is to have the first extension RATE and a second extension STDGTI
+            # Not sure if there's a general convention as to where the rest of the information is stored,
+            # but try to get the right header based on the selection below
             header = lcfile[0].header
-            if 'INSTRUME' not in header:
+            if ('INSTRUME' not in header) | ('TIMEZERO' not in header):
                 # For WFC, TIMESYS etc. are in the first extension header
                 header = lcfile[1].header
             instrument = header['INSTRUME']
@@ -1901,6 +1904,8 @@ class Observation:
 
             timesys = header['TIMESYS']
             timeunit = header['TIMEUNIT']
+            timepixr = header['TIMEPIXR']
+            timezero = header['TIMEZERO']*u.Unit(timeunit)
             time = lc['TIME']*u.Unit(timeunit)
 
             rate = lc['RATE']/u.s/effarea
@@ -1917,23 +1922,28 @@ class Observation:
                 for _gti in gti_ext:
                     gti = np.append(gti, _gti)#, axis=1)
 
-                return time, rate, error, timesys, timeunit, mjd, pca_time_to_mjd_tt(gti*u.Unit(timeunit), header).utc
+                return time, timepixr, timezero, rate, error, timesys, timeunit, mjd, pca_time_to_mjd_tt(gti*u.Unit(timeunit), header).utc
             else:
                 # for all other instruments we just add the MJDREF or MJDREFI, MJDREFF
+                # don't modify the time array; keep that as the raw units from the file
+                _time_days = (time+timezero).to('d')
                 if 'MJDREF' in header:
-                    time += header['MJDREF']*u.d
+                    _time_days += header['MJDREF']*u.d
                 elif ('MJDREFI' in header) & ('MJDREFF' in header):
-                    time += (header['MJDREFI']+header['MJDREFF'])*u.d
+                    _time_days += (header['MJDREFI']+header['MJDREFF'])*u.d
                 else:
                     logger.warning('no MJDREF keywords found, mjd may be incorrect')
-                mjd = Time( time, format='mjd', scale=timesys.lower())
-                if timesys == 'TT':
+                mjd = Time( _time_days, format='mjd', scale=timesys.lower())
+                # can check conversion here
+                if 'MJD-OBS' in header:
+                    assert np.allclose(mjd[0].value,header['MJD-OBS'])
+                if timesys.upper() == 'TT':
                     mjd = mjd.utc
 
                 # no GTI information for JEM-X, but we assume it's
                 # uninterrupted
 
-                return time, rate, error, timesys, timeunit, mjd, Time([min(mjd),max(mjd)])
+                return time, timepixr, timezero, rate, error, timesys, timeunit, mjd, Time([min(mjd),max(mjd)])
 
         path = self.get_path()
         if path is None:
@@ -1972,14 +1982,14 @@ class Observation:
             assert type(filename) == str
 
         self.file = '/'.join((path, filename))
-        self.time, self.rate, self.error, self.timesys, self.timeunit, self.mjd, self.gti = read_fits_lc(self.file, self.instr.effarea)
+        self.time, self.timepixr, self.timezero, self.rate, self.error, self.timesys, self.timeunit, self.mjd, self.gti = read_fits_lc(self.file, self.instr.effarea)
         if self.time is None:
             # file is not found
             return
 
         for i, file in enumerate(add_files):
             # here we read in any additional files and append them to the already-created arrays
-            _time, _rate, _error, _timesys, _timeunit, _mjd, _gti = read_fits_lc('/'.join((add_paths[i], file)), self.instr.effarea)
+            _time, _timepixr, _timezero, _rate, _error, _timesys, _timeunit, _mjd, _gti = read_fits_lc('/'.join((add_paths[i], file)), self.instr.effarea)
             self.file = np.append(self.file, '/'.join((add_paths[i], file)))
             # The ordering here will not necessarily be in time
             self.time = _time.insert(0, self.time)
@@ -1988,6 +1998,8 @@ class Observation:
             self.mjd = _mjd.insert(0, self.mjd)
             assert _timeunit == self.timeunit
             assert _timesys == self.timesys
+            assert _timepixr == self.timepixr
+            assert _timezero == self.timezero
             if _gti is not None:
                 self.gti = _gti.insert(0, self.gti)
         if self.gti is not None:
