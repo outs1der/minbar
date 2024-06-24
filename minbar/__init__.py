@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.20.1'
+__version__ = '1.21.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -56,6 +56,7 @@ DATE = datetime.now()
 # LOCAL_DATA flag is now determined dynamically as part of minbar.__init__
 
 MINBAR_ROOT = '/Users/Shared/burst/minbar'
+MINBAR_DR2 = MINBAR_ROOT+'/DR2'
 # LOCAL_DATA = True
 MINBAR_URL = 'https://burst.sci.monash.edu/'
 
@@ -1686,6 +1687,17 @@ class Observation:
         # to MINBAR DR1)
 
         if self.instr.label == 'NCR':
+            # generic set of command definitions for each instrument
+            # examples are given here; need to create these in a form where we can call them very generically
+            # TODO make these a part of the Instrument rather than Observation
+            # self.reduce_init='ftools' # CLI command to initialise analysis tools
+            self.reduce_init='source $HEADAS/headas-init.csh ; setenv CALDB http://heasarc.gsfc.nasa.gov/FTP/caldb; setenv CALDBCONFIG ${HOME}/burst/caldb/caldb.config; setenv CALDBALIAS ${HOME}/burst/caldb/alias_config.fits; setenv GEOMAG_PATH ${CALDBCONFIG}'
+            self.filter_events = { 'invoke': 'niextract-events "xti/event_cl/ni{}_0mpu7_cl.evt{}"',
+                                             'timesel': '[time={}:{}]',
+                                             'outfile': '{}' }
+            self.lightcurve = 'nicerl3-lc 2584010501 pirange=300-1500 timebin=1.0 clobber=YES'
+            self.spectrum = 'not yet implemented'
+
             # check analysis status for NICER data, via the filter file
             # this routine sets the filter, filter_header, and proc_date attributes
             self.filter = self.get_path()+'/auxil/ni{}.mkf'.format(self.obsid)

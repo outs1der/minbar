@@ -1476,6 +1476,13 @@ Created {} with the pyminbar package, see https://github.com/outs1der/minbar
     burst_win = (-50, 206) # [s] time window to extract burst lightcurve over
     burst_lc_file = 'burst.lc'
 
+    # dict listing all the files created, so we can clean them later
+
+    files_created = {1: (), 2: (),
+        3: (burst_file, burst_dir.format('*'), '/'.join((burst_dir.format('*'),burst_lc_file))),
+        4: (),
+        5: () }
+
     assert type(obs) == minbar.Observation
     levels = (0, 1, 2, 3, 4, 5, 9)
 
@@ -1548,15 +1555,30 @@ Burst times are in {}'''.format(obs.burst_file, obs.instr.name, obs.obsid, minba
 
                 for i, burst in enumerate(bursts):
                     minbar.logger.info('processing burst #{}, {} {}'.format(i+1, obs.mjd.format.upper(), burst))
-                    _burst_path = '/'.join((path,burst_dir.format(i+1)))
-                    os.mkdir(_burst_path)
+                    _burst = burst_dir.format(i+1)
+                    _burst_path = '/'.join((path,_burst))
+                    # os.mkdir(_burst_path)
                     sel = (obs.mjd.value > burst+burst_win[0]/86400) & (obs.mjd.value < burst+burst_win[1]/86400)
                     _path_and_file = '/'.join((_burst_path,burst_lc_file))
+
+                    # assemble the extraction command
+                    # this is supposed to be generic so that it would work with any instrument
+                    _extract = ' '.join((obs.filter_events['invoke'], obs.filter_events['outfile'])).format(
+                        obs.obsid,
+                        obs.filter_events['timesel'].format(min(obs.time[sel].value), max(obs.time[sel].value)),
+                        '/'.join((_burst_path,'burst.evt')))
+                    breakpoint()
+                    # this will run once you import subprocess, but throws an error:
+                    # ERROR: Device not configured
+                    # Task niextract - events 0.0 terminating with status 6
+                    _result = subprocess.run(';'.join((obs.reduce_init,'cd {}'.format(obs.get_path()),_extract)), shell=True, executable='/bin/csh')
+                    breakpoint()
                     if os.path.exists(_path_and_file) & (not clobber):
                         minbar.logger.warning('{} exists and clobber is set to False, skipping burst lightcurve file write'.format(burst_lc_file))
                         minbar.logger.info('Level {} processing interrupted, need to reconcile burst search results and existing file'.format(level))
                         break
                     else:
+                        # original way of generating the burst lightcurve, extracted from the main lightcurve
                         f = open('/'.join((_burst_path,burst_lc_file)), 'w')
                         np.savetxt(f, np.column_stack([(obs.mjd.value[sel]-burst)*86400, obs.rate.value[sel], obs.error.value[sel]]),
                                    fmt='%9.5f', header=header_default+'''File {}
@@ -1586,25 +1608,29 @@ Columns:
     return True # assuming no errors
 
 
-def analyse_persistent(self):
+def analyse_burst(self, obs, burst):
     """
-    Function to analyse the persistent emission (lightcurve and spectrum) for a single
+    Function to analyse each burst in a single
     observation (not yet implemented)
+
+    :param obs: Observation in which the burst occurred
+    :param burst: [str] directory with burst data
 
     :return:
     """
 
     pass
 
-def analyse_burst(self, bursts):
+
+def analyse_persistent(self, obs):
     """
     Function to analyse the persistent emission (lightcurve and spectrum) for a single
     observation (not yet implemented)
 
-    :param bursts: start times for burst(s) to analyse
+    :param obs: Observation in which the burst occurred
+
     :return:
     """
 
     pass
-
 
