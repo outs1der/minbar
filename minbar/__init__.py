@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.19.2'
+__version__ = '1.21.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -56,6 +56,7 @@ DATE = datetime.now()
 # LOCAL_DATA flag is now determined dynamically as part of minbar.__init__
 
 MINBAR_ROOT = '/Users/Shared/burst/minbar'
+MINBAR_DR2 = MINBAR_ROOT+'/DR2'
 # LOCAL_DATA = True
 MINBAR_URL = 'https://burst.sci.monash.edu/'
 
@@ -1600,6 +1601,17 @@ class Observation:
         It'd be nice to be able to create this just given the obs ID (for example), but
         then we'd need to keep a copy of the Observations object, which seems wasteful
 
+        For the purposes of adding new data to MINBAR, we also define an analysis level, as
+        follows:
+
+        | level = 0 # no analysis products (known to be) present
+        | level = 1 # raw analysis/reduction steps have been completed but no lightcurves or spectra yet created
+        | level = 2 # lightcurve(s) are available
+        | level = 3 # burst search has been completed and any burst data has been generated
+        | level = 4 # time-resolved spectroscopy is available
+        | level = 5 # persistent spectra are available
+        | level = 9 # defined from a MINBAR observation entry, may not be any raw data available
+
         Example usage:
 
         | import minbar
@@ -1610,8 +1622,15 @@ class Observation:
         :param instr: :class:`minbar.Instrument` object corresponding to the source instrument for these data
         :param source: source name
         :param obsid: observation ID
+
+        :returns: None
         """
 
+        if (obs_entry is None) and ((instr is None) | (name is None) | (obsid is None)):
+            logger.error('need to supply obs_entry or instr, name & obsid')
+            return
+
+        self.level = 0    # "analysis level"
         if obs_entry is not None:
             # logger.warning('initialisation from obs entry not yet completely implemented')
 
@@ -1642,6 +1661,12 @@ class Observation:
                 # self.bursts =
                 self.bursts = obs_entry.meta['bursts']
 
+            self.level = 9
+        elif instr.label in MINBAR_INSTR_LABEL:
+            # this is a MINBAR instrument, even if it's an observation that's not in MINBAR
+            # TODO check here if the observation exists in MINBAR, and assign an obsid etc. if it is
+            logger.error('PCA/WFC/JEM-X observation not from obs_entry, not yet implemented (sorry)')
+            return
         else:
             # this observation isn't in MINBAR, so it has no entry
             self.entry = None
@@ -1654,10 +1679,56 @@ class Observation:
         # Define parameters for the lightcurve; later this might be a class
         # The lightcurve might also not be available, so don't force it to be read in now
 
-        self.time = None
+        self.time, self.mjd = None, None
         self.rate = None
         self.error = None
 
+        # Below we have some instrument-specific sections, for "new" instruments (not contributing
+        # to MINBAR DR1)
+
+        if self.instr.label == 'NCR':
+            # generic set of command definitions for each instrument
+            # examples are given here; need to create these in a form where we can call them very generically
+            # TODO make these a part of the Instrument rather than Observation
+            # self.reduce_init='ftools' # CLI command to initialise analysis tools
+            self.reduce_init='source $HEADAS/headas-init.csh ; setenv CALDB http://heasarc.gsfc.nasa.gov/FTP/caldb; setenv CALDBCONFIG ${HOME}/burst/caldb/caldb.config; setenv CALDBALIAS ${HOME}/burst/caldb/alias_config.fits; setenv GEOMAG_PATH ${CALDBCONFIG}'
+            self.filter_events = { 'invoke': 'niextract-events "xti/event_cl/ni{}_0mpu7_cl.evt{}"',
+                                             'timesel': '[time={}:{}]',
+                                             'outfile': '{}' }
+            self.lightcurve = 'nicerl3-lc 2584010501 pirange=300-1500 timebin=1.0 clobber=YES'
+            self.spectrum = 'not yet implemented'
+
+            # check analysis status for NICER data, via the filter file
+            # this routine sets the filter, filter_header, and proc_date attributes
+            self.filter = self.get_path()+'/auxil/ni{}.mkf'.format(self.obsid)
+            self.filter_header = None
+            self.proc_date = None
+            if not os.path.isfile(self.filter):
+                # might still be GZipped
+                self.filter += '.gz'
+            if os.path.isfile(self.filter):
+                # check date of creation of filter file
+                f = fits.open(self.filter)
+                iext = 0
+                self.proc_date = f[iext].header.get('DATE')
+                while (self.proc_date is None) & (iext < len(f)-1):
+                    iext += 1
+                    self.proc_date = f[iext].header.get('DATE')
+                # We assume that the header extension with the DATE also has all the other interesting stuff
+                self.filter_header = f[iext].header
+                f.close()
+                logger.info('read in header information from filter file\n  {}'.format(self.filter))
+                # initially I called this level 1, but now that's just if the directory exists (might change later)
+                # self.level = 1
+                # could do some other checks, e.g. for the source name (replacing underscores with spaces):
+                # ' '.join(self.filter_header['OBJECT'].split('_')) == self.name
+                # check the position, etc.
+            else:
+                logger.warning('no filter file found, may need to run level-2 analysis')
+                return
+
+            if self.level == 0:
+                self.level = self.verify(warnings=False)
 
     def __str__(self):
         """
@@ -1805,21 +1876,28 @@ class Observation:
 
         def read_fits_lc(file, effarea = 1.*u.cm**2):
             """
-            Utility routine to read in the important bits of a lightcurve
+            Utility routine to read in the important bits of a lightcurve.
+            The header is read in, but not returned; we return the key bits of information
 
             :param file: name of file to read in
             :param effarea: effective area adopted to convert count rate to
               counts/cm^2/s (standard for MINBAR lightcurves)
 
-            :return: time, rate, error, timesys, timeunit, mjd, gti
+            :return: time, timepixr, timezero, rate, error, timesys, timeunit, mjd, gti
             """
 
             # print (path+'/'+filename)
+            if not os.path.isfile(file):
+                logger.error('lightcurve file not found\n  {}'.format(file))
+                return None, None, None, None, None, None, None, None, None
+
             lcfile = fits.open(file)
 
             # For XTE files, convention is to have the first extension RATE and a second extension STDGTI
+            # Not sure if there's a general convention as to where the rest of the information is stored,
+            # but try to get the right header based on the selection below
             header = lcfile[0].header
-            if 'INSTRUME' not in header:
+            if ('INSTRUME' not in header) | ('TIMEZERO' not in header):
                 # For WFC, TIMESYS etc. are in the first extension header
                 header = lcfile[1].header
             instrument = header['INSTRUME']
@@ -1838,6 +1916,8 @@ class Observation:
 
             timesys = header['TIMESYS']
             timeunit = header['TIMEUNIT']
+            timepixr = header['TIMEPIXR']
+            timezero = header['TIMEZERO']*u.Unit(timeunit)
             time = lc['TIME']*u.Unit(timeunit)
 
             rate = lc['RATE']/u.s/effarea
@@ -1854,18 +1934,28 @@ class Observation:
                 for _gti in gti_ext:
                     gti = np.append(gti, _gti)#, axis=1)
 
-                return time, rate, error, timesys, timeunit, mjd, pca_time_to_mjd_tt(gti*u.Unit(timeunit), header).utc
+                return time, timepixr, timezero, rate, error, timesys, timeunit, mjd, pca_time_to_mjd_tt(gti*u.Unit(timeunit), header).utc
             else:
+                # for all other instruments we just add the MJDREF or MJDREFI, MJDREFF
+                # don't modify the time array; keep that as the raw units from the file
+                _time_days = (time+timezero).to('d')
                 if 'MJDREF' in header:
-                    time += header['MJDREF']*u.d
-                mjd = Time( time, format='mjd', scale=timesys.lower())
-                if timesys == 'TT':
+                    _time_days += header['MJDREF']*u.d
+                elif ('MJDREFI' in header) & ('MJDREFF' in header):
+                    _time_days += (header['MJDREFI']+header['MJDREFF'])*u.d
+                else:
+                    logger.warning('no MJDREF keywords found, mjd may be incorrect')
+                mjd = Time( _time_days, format='mjd', scale=timesys.lower())
+                # can check conversion here
+                if 'MJD-OBS' in header:
+                    assert np.allclose(mjd[0].value,header['MJD-OBS'])
+                if timesys.upper() == 'TT':
                     mjd = mjd.utc
 
                 # no GTI information for JEM-X, but we assume it's
                 # uninterrupted
 
-                return time, rate, error, timesys, timeunit, mjd, Time([min(mjd),max(mjd)])
+                return time, timepixr, timezero, rate, error, timesys, timeunit, mjd, Time([min(mjd),max(mjd)])
 
         path = self.get_path()
         if path is None:
@@ -1897,13 +1987,21 @@ class Observation:
         else:
             # logger.warning("other instruments not yet implemented")
             filename = self.instr.lightcurve
+            if type(filename) != str:
+                # we have a list or something, so we need to pick one of the elements
+                logger.warning('multiple lightcurve files listed, choosing first')
+                filename = self.instr.lightcurve[0]
+            assert type(filename) == str
 
         self.file = '/'.join((path, filename))
-        self.time, self.rate, self.error, self.timesys, self.timeunit, self.mjd, self.gti = read_fits_lc(self.file, self.instr.effarea)
+        self.time, self.timepixr, self.timezero, self.rate, self.error, self.timesys, self.timeunit, self.mjd, self.gti = read_fits_lc(self.file, self.instr.effarea)
+        if self.time is None:
+            # file is not found
+            return
 
         for i, file in enumerate(add_files):
             # here we read in any additional files and append them to the already-created arrays
-            _time, _rate, _error, _timesys, _timeunit, _mjd, _gti = read_fits_lc('/'.join((add_paths[i], file)), self.instr.effarea)
+            _time, _timepixr, _timezero, _rate, _error, _timesys, _timeunit, _mjd, _gti = read_fits_lc('/'.join((add_paths[i], file)), self.instr.effarea)
             self.file = np.append(self.file, '/'.join((add_paths[i], file)))
             # The ordering here will not necessarily be in time
             self.time = _time.insert(0, self.time)
@@ -1912,6 +2010,8 @@ class Observation:
             self.mjd = _mjd.insert(0, self.mjd)
             assert _timeunit == self.timeunit
             assert _timesys == self.timesys
+            assert _timepixr == self.timepixr
+            assert _timezero == self.timezero
             if _gti is not None:
                 self.gti = _gti.insert(0, self.gti)
         if self.gti is not None:
@@ -1924,26 +2024,66 @@ class Observation:
 
         return #lc
 
-    def analyse_persistent(self):
-        """
-        Function to analyse the persistent emission (lightcurve and spectrum) for a single
-        observation (not yet implemented)
 
-        :return:
-        """
+    def verify(self, warnings=True):
+        '''
+        Routine to verify a given observation. Will check for different components
+        (lightcurve, spectrum, analysis results) and assign a level; cf. with the __init__
+        method
 
-        pass
+        :param warnings: boolean, set to True oo display warnings, or False to not
 
-    def analyse_burst(self, bursts):
-        """
-        Function to analyse the persistent emission (lightcurve and spectrum) for a single
-        observation (not yet implemented)
+        :return: level that the observation is assessed at
+        '''
 
-        :param bursts: start times for burst(s) to analyse
-        :return:
-        """
+        level = 0
 
-        pass
+        # TODO think about what happens if you skip a level, e.g. the persistent spectra are available but no lightcurve
+
+        _path = self.get_path()
+        if os.path.isdir(_path):
+            # if the directory exists, call this level 1
+            # TODO might require that a filter file exists (for example), but then need to specify that in the instrument/Observation definition
+            level = 1
+
+        if self.instr.label == 'XP':
+            # slightly different approach for RXTE/PCA data
+            if os.path.isfile(self.instr.lightcurve(self.obsid)):
+                level = 2
+        elif type(self.instr.lightcurve) != str:
+            # multiple lightcurve files
+            for _lightcurve in self.instr.lightcurve:
+                if os.path.isfile('/'.join((_path, _lightcurve))):
+                    level = 2
+        else:
+            # single lightcurve file
+            if os.path.isfile('/'.join((_path, self.instr.lightcurve))):
+                level = 2
+
+        if False:
+            # has a burst search been run, and any data generated for bursts?
+            # TODO establish how we are going to save the results of the burst search
+            level = 3
+
+        if self.instr.timespec is not None:
+            # does the time-resolved spectroscopy information exist?
+            # need to loop over available bursts here
+            if os.path.isfile('/'.join((_path, self.instr.timespec))):
+                level = 4
+
+        if self.instr.spectrum is not None:
+            # does the spectral file exist?
+            if os.path.isfile('/'.join((_path, self.instr.spectrum))):
+                level = 5
+
+        if self.entry is not None:
+            # is this an observation created from/linked to a MINBAR entry?
+            level = 9
+
+        if (self.level != level) & warnings:
+            logger.warning('verify level is != existing level ({} != {})'.format(level, self.level))
+
+        return level
 
 
 class Sources:
@@ -2328,10 +2468,11 @@ class Instrument:
     Defines the properties of an instrument with data that we're going to analyse and add to MINBAR
     """
 
-    def __init__(self, name, camera=None, path=None, label=None,
+    def __init__(self, name, sat=None, camera=None, path=None, label=None,
                  lightcurve=['lc1_3-25keV_1.0s.fits','lc2_3-25keV_1.0s.fits'],
                  source_name=None,
                  spectrum=None,
+                 timespec=None,
                  verbose=False,
                  effarea=None):
         """
@@ -2340,25 +2481,28 @@ class Instrument:
         Example usage:
 
         | import minbar
-        | jemx = minbar.Instrument('JEM-X', 'jemx', 'IJ')
+        | jemx = minbar.Instrument('JEM-X', camera='jemx', label='IJ')
 
         :param name: string giving instrument name; for the MINBAR instruments, these are defined as MINBAR_INSTR_NAME.keys()
+        :param sat: string with the satellite name
         :param camera: qualifier for the instrument name; e.g. camera 1 or 2 for WFC or JEM-X. TODO decide how to deal with this for the PCA
         :param path: local path specifier for observations from this instrument
         :param label: two-character label code for this instrument
         :param lightcurve: filename for the lightcurves
         :param source_name: list of source names for this instrument, defaulting to the names from :class:`minbar.Sources`
         :param spectrum: filename for the spectra
+        :param timespec: filename for the time-resolved spectroscopy information
         :param verbose: passed to :meth:`minbar.Instrument.verify_path`
         :param effarea: effective area assumed for this instrument [cm^2]
         """
 
         self.name = name
+        self.camera = camera
+        self.sat = sat
         if name in MINBAR_INSTR_LABEL.keys():
             # These are the known MINBAR instruments
             self.label = MINBAR_INSTR_LABEL[name]
             self.sat = MINBAR_INSTR_SAT[name]
-            self.camera = camera
             if path is None:
                 path = MINBAR_INSTR_PATH[self.label]
 
@@ -2534,6 +2678,7 @@ class Instrument:
         assert lightcurve is not None
         self.lightcurve = lightcurve
         self.spectrum = spectrum
+        self.timespec = timespec
 
 
     def __str__(self):
@@ -2544,14 +2689,19 @@ class Instrument:
         :return:
         """
 
+        if self.sat is None:
+            _name = self.name
+        else:
+            _name = self.sat+'/'+self.name
+
         return """
 MINBAR instrument definition
 
-Name: {}/{} ({})
+Name: {} ({})
 Camera/detector flag: {}
 Data path: {}/{}/data
 Lightcurve(s): {}
-Spectra: {}""".format(self.sat, self.name, self.label, 
+Spectra: {}""".format(_name, self.label,
             self.camera or 'not specified', MINBAR_ROOT, self.path, self.lightcurve, self.spectrum)
 
 
