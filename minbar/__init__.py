@@ -24,10 +24,11 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.21.0'
+__version__ = '1.22.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
+from .build import *
 import numpy as np
 import pandas as pd
 import os, re
@@ -163,6 +164,45 @@ BOL_CORR = {'4U 0513-40':         (1, 1.47, 0.02),
 ANISOTROPY = {'non-dipper': (0.898, 0.809),
               'dipper': (1.639, 7.27)}
 
+# Source types as used in the Type field of the Sources table; see also Table 1 of the DR1 paper
+
+TYPE_NAMES = {'atoll': 'A', 'atolls': 'A', 'ultracompact': 'C', 'UCXB': 'C', 'dipper': 'D',
+              'dippers': 'D', 'eclipsing': 'E', 'globular': 'G', 'cluster': 'G',
+              'intermittent': 'I', 'microquasar': 'M', 'oscillation': 'O', 'pulsar': 'P',
+              'pulsars': 'P', 'radio': 'R', 'superburst': 'S', 'transient': 'T',
+              'transients': 'T', 'Z-source': 'Z', 'burster': 'B', 'bursters': 'B'}
+
+# Burst discovery instrument acronyms & names; see Table 3
+
+DISC_INSTR = {'WFC': 'BeppoSAX Wide Field Camera (WFC)',
+              'NFI': 'BeppoSAX Narrow Field Instruments (NFI)',
+              'XTE': 'RXTE Proportional Counter Array (PCA)',
+              'JEM': 'INTEGRAL Joint European X-Ray Monitor (JEM-X)',
+              'IBI': 'INTEGRAL Imager on Board the INTEGRAL Satellite (IBIS)',
+              'SAS': 'Small Astronomy Satellite 3 (SAS-3)',
+              'BAT': 'Swift Burst Alert Telescope (BAT)',
+              'XRT': 'Swift X-Ray Telescope (XRT)',
+              'EXO': 'European X-Ray Observatory Satellite (EXOSAT)',
+              'OS8': 'Orbiting Solar Observatory 8 (OSO-8)',
+              'HAK': 'Hakucho',
+              'TTM': 'Mir-Kvant Coded Mask Imaging Spectrometer (COMIS)',
+              'GIN': 'Ginga',
+              'EIN': 'Einstein X-ray Observatory',
+              'ASC': 'Advanced Satellite for Cosmology and Astrophysics (ASCA)',
+              'VEL': 'Vela',
+              'MAX': 'ISS Monitor of All-Sky X-ray Image (MAXI)',
+              'NIC': 'ISS Neutron star Interior Composition Explorer (NICER)',
+              'NUS': 'Nuclear Spectroscopic Telescope Array (NuSTAR)',
+              'SLX': 'Spacelab-2',
+              'AGI': 'Astro-rivelatore Gamma a Immagini Leggero (AGILE)',
+              'ANS': 'Astronomical Netherlands Satellite (ANS)',
+              'GRA': 'Granat Astrophysical Roentgen Telescope (ART-P)',
+              'HET': 'High-Energy Transient Explorer 2 (HETE-2)',
+              'UHU': 'Uhuru',
+              'OPT': 'optical bursts', # 4U 1254-69
+              # new post-DR1
+              'CHA': 'Chandra X-ray Observatory' }
+
 # List of ultra compacts based on In 't Zand (2007)
 # Includes all candidates.  Updated as of MINBAR source list v2.6
 # Can also generate using the Sources object, with method .type('C')
@@ -174,6 +214,88 @@ UCXBS = ['4U 0513-40', '4U 0614+09', '2S 0918-549', '4U 1246-588',
            'XMMU J181227.8-181234', '4U 1812-12', '4U 1820-303',
            'XB 1832-330', '4U 1850-086', 'XB 1905+000', 'XB 1916-053',
            'M15 X-2']
+
+# The data below is from Table 8 of the DR1 paper, as used in the get_distances method for class Sources
+# For each listed source we define a "distance tuple"; the components are:
+# 1. the average peak luminosity and 1-sigma error (in 1E-9 erg/cm^2/s);
+# 2. the "measured" distance in kpc, with two-sided error (upper and lower), and a string
+#    indicating the source;
+# 3. the distance in kpc inferred from the peak Eddington flux for X=0.7, and 1-sigma error;
+# 4. the distance in kpc inferred from the peak Eddington flux for X=0.0, and 1-sigma error
+
+TABLE8 = {'4U 0513-40': ((14.4, 6.7), (10.32, 0.2, -0.24, '1'), (8.5, 1.5), (11.1, 1.9)),
+          '4U 0614+09': ((266.0, 6.0), (3.27, 2.42, -1.3, 'G'), (1.99, 0.02), (2.59, 0.03)),
+          'EXO 0748-676': ((46.5, 4.3), (0.0, 0.0, -0.0, ''), (4.7, 0.2), (6.2, 0.3)),
+          '4U 0836-429': ((0.0, 0.0), (3.18, 2.25, -1.4, 'G'), (0.0, 6.9), (0.0, 9.0)),
+          '2S 0918-549': ((119.1, 14.4), (5.77, 2.77, -1.6, 'G'), (3.0, 0.2), (3.9, 0.2)),
+          '4U 1246-588': ((120.3, 11.9), (2.03, 2.37, -1.17, 'G'), (3.0, 0.1), (3.8, 0.2)),
+          '4U 1254-69': ((0.0, 0.0), (3.18, 3.16, -1.33, 'G'), (0.0, 6.0), (0.0, 7.9)),
+          'SAX J1324.5-6313': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.7), (0.0, 6.1)),
+          '4U 1323-62': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 5.2), (0.0, 6.8)),
+          'Cir X-1': ((0.0, 0.0), (6.17, 2.86, -1.96, 'G'), (0.0, 13.6), (0.0, 17.7)),
+          '4U 1608-522': ((169.0, 41.2), (5.8, 1.8, -2.0, '2'), (2.5, 0.3), (3.2, 0.3)),
+          '4U 1636-536': ((72.5, 18.8), (4.42, 3.08, -1.63, 'G'), (3.8, 0.4), (5.0, 0.5)),
+          'XTE J1701-462': ((43.4, 1.4), (0.0, 0.0, -0.0, ''), (4.9, 0.1), (6.4, 0.1)),
+          'MXB 1658-298': ((17.0, 15.9), (0.0, 0.0, -0.0, ''), (7.9, 2.2), (10.2, 2.9)),
+          '4U 1702-429': ((88.7, 45.0), (0.0, 0.0, -0.0, ''), (3.4, 0.6), (4.5, 0.8)),
+          '4U 1705-32': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.4), (0.0, 5.7)),
+          '4U 1705-44': ((41.3, 17.5), (0.0, 0.0, -0.0, ''), (5.0, 0.8), (6.6, 1.1)),
+          'XTE J1709-267': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 2.7), (0.0, 3.6)),
+          'XTE J1710-281': ((7.1, 1.8), (0.0, 0.0, -0.0, ''), (12.2, 1.3), (15.9, 1.7)),
+          'SAX J1712.6-3739': ((76.0, 46.9), (0.0, 0.0, -0.0, ''), (3.7, 0.8), (4.8, 1.0)),
+          '2S 1711-339': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.9), (0.0, 6.4)),
+          'RX J1718.4-4029': ((47.2, 6.2), (0.0, 0.0, -0.0, ''), (4.7, 0.3), (6.1, 0.4)),
+          'IGR J17191-2821': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 5.9), (0.0, 7.7)),
+          'XTE J1723-376': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 3.7), (0.0, 4.8)),
+          '4U 1722-30': ((61.8, 16.6), (7.4, 0.5, -0.5, '3,4,5'), (4.1, 0.5), (5.4, 0.6)),
+          '4U 1728-34': ((94.0, 35.9), (0.0, 0.0, -0.0, ''), (3.3, 0.5), (4.4, 0.7)),
+          'MXB 1730-335': ((28.0, 7.0), (7.87, 0.56, -0.5, '5'), (6.1, 0.6), (8.0, 0.8)),
+          'KS 1731-260': ((50.5, 20.4), (0.0, 0.0, -0.0, ''), (4.6, 0.7), (5.9, 0.9)),
+          'SLX 1735-269': ((52.9, 21.0), (0.0, 0.0, -0.0, ''), (4.5, 0.7), (5.8, 0.9)),
+          '4U 1735-444': ((34.2, 22.0), (5.65, 3.62, -2.14, 'G'), (5.5, 1.2), (7.2, 1.6)),
+          'XTE J1739-285': ((0.0, 0.0), (4.06, 4.25, -2.44, 'G'), (0.0, 6.1), (0.0, 7.9)),
+          'SLX 1737-282': ((68.1, 12.4), (0.0, 0.0, -0.0, ''), (3.9, 0.3), (5.1, 0.4)),
+          'KS 1741-293': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.2), (0.0, 5.4)),
+          'GRS 1741.9-2853': ((35.3, 9.8), (0.0, 0.0, -0.0, ''), (5.5, 0.6), (7.1, 0.8)),
+          '1A 1742-294': ((37.7, 1.3), (0.0, 0.0, -0.0, ''), (5.3, 0.1), (6.9, 0.1)),
+          'SAX J1747.0-2853': ((52.7, 31.4), (0.0, 0.0, -0.0, ''), (4.5, 0.9), (5.8, 1.2)),
+          'IGR J17473-2721': ((113.6, 11.7), (0.0, 0.0, -0.0, ''), (3.0, 0.1), (4.0, 0.2)),
+          'SLX 1744-300': ((13.7, 3.2), (0.0, 0.0, -0.0, ''), (8.7, 0.9), (11.4, 1.1)),
+          'GX 3+1': ((53.3, 15.2), (0.0, 0.0, -0.0, ''), (4.4, 0.5), (5.8, 0.7)),
+          'IGR J17480-2446': ((36.1, 9.0), (6.9, 0.5, -0.5, '3,4,6'), (5.4, 0.6), (7.0, 0.7)),
+          '1A 1744-361': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 7.0), (0.0, 9.1)),
+          'SAX J1748.9-2021': ((38.0, 6.1), (8.4, 1.5, -1.3, '3,4'), (5.3, 0.4), (6.9, 0.5)),
+          'EXO 1745-248': ((63.4, 10.9), (6.9, 0.5, -0.5, '3,4,6'), (4.1, 0.3), (5.3, 0.4)),
+          'IGR J17498-2921': ((51.6, 1.6), (0.0, 0.0, -0.0, ''), (4.5, 0.1), (5.9, 0.1)),
+          '4U 1746-37': ((5.4, 0.8), (0.0, 0.0, -0.0, ''), (13.9, 1.0), (18.2, 1.3)),
+          'SAX J1750.8-2900': ((54.3, 6.1), (0.0, 0.0, -0.0, ''), (4.4, 0.2), (5.7, 0.3)),
+          'GRS 1747-312': ((13.4, 7.3), (6.7, 0.5, -0.5, '3,4,6'), (8.8, 1.7), (11.5, 2.2)),
+          'IGR J17511-3057': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.1), (0.0, 5.4)),
+          'SAX J1752.3-3138': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 6.8), (0.0, 8.9)),
+          'SAX J1753.5-2349': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.4), (0.0, 5.7)),
+          'IGR J17597-2201': ((15.7, 0.8), (0.0, 0.0, -0.0, ''), (8.2, 0.2), (10.7, 0.3)),
+          'SAX J1806.5-2215': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.8), (0.0, 6.2)),
+          '2S 1803-245': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.2), (0.0, 5.4)),
+          'SAX J1808.4-3658': ((230.2, 26.3), (0.0, 0.0, -0.0, ''), (2.1, 0.1), (2.8, 0.1)),
+          'XTE J1810-189': ((54.2, 1.8), (0.0, 0.0, -0.0, ''), (4.4, 0.1), (5.7, 0.1)),
+          'SAX J1810.8-2609': ((111.3, 7.2), (0.0, 0.0, -0.0, ''), (3.1, 0.1), (4.0, 0.1)),
+          'XMMU J181227.8-181234': ((2.4, 0.3), (14.0, 2.0, -2.0, '7'), (20.9, 1.2), (27.2, 1.5)),
+          'XTE J1814-338': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 8.6), (0.0, 11.3)),
+          '4U 1812-12': ((203.1, 40.1), (0.0, 0.0, -0.0, ''), (2.3, 0.2), (3.0, 0.3)),
+          'GX 17+2': ((14.6, 5.0), (0.0, 0.0, -0.0, ''), (8.5, 1.2), (11.1, 1.5)),
+          'SAX J1818.7+1424': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 5.9), (0.0, 7.7)),
+          '4U 1820-303': ((60.5, 22.6), (7.6, 0.4, -0.4, '3,4,8'), (4.2, 0.6), (5.4, 0.8)),
+          'SAX J1828.5-1037': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 5.8), (0.0, 7.6)),
+          'GS 1826-24': ((40.0, 3.0), (0.0, 0.0, -0.0, ''), (5.1, 0.2), (6.7, 0.2)),
+          'XB 1832-330': ((33.8, 4.5), (9.6, 0.4, -0.4, '3,4,9'), (5.6, 0.3), (7.3, 0.4)),
+          'Ser X-1': ((29.4, 13.8), (4.31, 2.54, -1.61, 'G'), (6.0, 1.0), (7.8, 1.4)),
+          'HETE J1900.1-2455': ((123.9, 8.6), (0.0, 0.0, -0.0, ''), (2.9, 0.1), (3.8, 0.1)),
+          'Aql X-1': ((103.3, 19.6), (2.97, 2.64, -1.32, 'G'), (3.2, 0.3), (4.2, 0.3)),
+          'XB 1916-053': ((30.6, 3.5), (0.0, 0.0, -0.0, ''), (5.8, 0.3), (7.6, 0.4)),
+          'XTE J2123-058': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 12.3), (0.0, 16.0)),
+          'M15 X-2': ((40.8, 7.2), (10.38, 0.15, -0.15, '1'), (5.1, 0.4), (6.6, 0.5)),
+          'Cyg X-2': ((13.1, 2.3), (6.95, 1.16, -0.91, 'G'), (8.9, 0.7), (11.6, 0.9)),
+          'SAX J2224.9+5421': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 6.0), (0.0, 7.9))}
 
 # Set up for publication-quality plots
 
@@ -272,7 +394,7 @@ class Minbar(IDLDatabase):
     """
     This class is provided to access MINBAR burst or observation data
     EITHER from the MRT tables (publicly available) or from the original
-    IDL database files.  Methods here are common to both 
+    IDL database files.  Methods here are common to both
     :class:`minbar.Bursts` and :class:`minbar.Observations` classes
 
     Visibility is controlled by the ``selection`` attribute, which indicates
@@ -761,7 +883,7 @@ class Minbar(IDLDatabase):
 
     def select_all(self, names):
         """
-        Select multiple sources with given names. Now redundant, since 
+        Select multiple sources with given names. Now redundant, since
         :meth:`minbar.Minbar.select` accepts arrays as well as single
         strings
         """
@@ -772,14 +894,14 @@ class Minbar(IDLDatabase):
         """
 	Removes source with given name from the current selection.  Now
 	redundant, since :meth:`minbar.Minbar.select` has the optional
-        ``exclude`` flag. 
+        ``exclude`` flag.
         """
 
         return self.select(name, exclude=True)
 
     def exclude_like(self, name):
         """
-        Like :meth:`minbar.Minbar.exclude`, but get the name from 
+        Like :meth:`minbar.Minbar.exclude`, but get the name from
         :meth:`minbar.Minbar.get_name_like`.
 
         If multiple names are found, the first is excluded
@@ -812,7 +934,7 @@ class Bursts(Minbar):
     Class for extracting and anlysing the MINBAR burst data. The class
     methods operate on the table read in from the MRT file, which should be
     downloaded as part of the install process.
-    
+
     Example usage:
 
     | import minbar
@@ -824,21 +946,21 @@ class Bursts(Minbar):
     | mb.create_distance_correction() # Include distance information from Sources()
     | distance = mb['dist']
     | luminosity = flux*mb['distcor'] # Luminosity in erg/s
-    
+
     | mb.name_like('1826') # Replace selection by another source
     | mb.select_all(['GS 1826-24', '4U 1636-536']) # Select multiple sources; requires exact names
     | mb.clear() # Clear the selection so all sources are included
     | mb.exclude_like('1636') # Exclude source from selection
     | mb.exclude_like('1826') # Now two sources are excluded
     """
-    
+
     timefield = 'time' # The field used for determining time order
     entryname = 'burst'
-    
+
     def __init__(self, filename=None, type=1, IDL=False):
         """
         Create a new Bursts instance.
-        
+
         :param filename: path to the database files, excluding their extension.  By default the minbar database in the directory of this script is used.
         :param type: burst type. The default, 1, selects all vetted Type I bursts. Setting it to None means no type is selected.
         """
@@ -1025,7 +1147,7 @@ class Bursts(Minbar):
         return _data
 
 
-    def burstplot(self, entry=None, param='flux', bdata=None, show=True, 
+    def burstplot(self, entry=None, param='flux', bdata=None, show=True,
         **kwargs):
         """
 	General-purpose routine to plot burst data. Would like to be able
@@ -1060,15 +1182,15 @@ class Bursts(Minbar):
             :param ylabel: dict of y-labels, param names as key
             :param color: dict of colors, param names as key
             """
-    
+
             has_error = np.all([x in bdata for x in [param+'_min',param+'_max']]) | (param == 'r')
-    
+
             # filter on good data
             _gd = bdata.flux*bdata.fluxerr > 0
 
             # add an extra value copy here to plot that last step
-            ax.step(np.append(bdata.time[_gd].values, 
-                bdata.time[_gd][-1:].values+bdata.dt[_gd][-1:].values), 
+            ax.step(np.append(bdata.time[_gd].values,
+                bdata.time[_gd][-1:].values+bdata.dt[_gd][-1:].values),
                 np.append(bdata[param][_gd].values,bdata[param][_gd][-1:].values),
                 where='post',color=color[param])
             if has_error:
@@ -1089,11 +1211,11 @@ class Bursts(Minbar):
         # conventions of the SAX and RXTE data
         ylabel = {'r': 'Count rate [s$^{-1}$]',
                   'flux': 'Flux [$10^{-9} \mathrm{erg\,cm^{-2}\,s^{-1}}$]',
-                  'kT': 'kT [keV]', 
+                  'kT': 'kT [keV]',
                   'rad': 'Blackbody normalisation\n[$(R_{\mathrm{km}}/d_{10\ \mathrm{kpc}})^2$]',
                   'chisq': 'Fit $\chi^2/n_{\mathrm{DOF}}$'}
         color = {'r': 'k', 'flux': 'k', 'kT': 'r', 'rad': 'b', 'chisq': 'g'}
-    
+
         # check that the passed labels match one of the above
 
         test_param = param
@@ -1116,17 +1238,17 @@ class Bursts(Minbar):
             bdata = self.get_burst_data(entry)
 
         fig = plt.figure()
-    
-        # Use GridSpec to constrain the layout, for maximum flexibility; see 
+
+        # Use GridSpec to constrain the layout, for maximum flexibility; see
         # https://matplotlib.org/stable/tutorials/intermediate/gridspec.html
-    
+
         if param == 'hr':
             # this is the special three-panel plot with flux, blackbody
             # radius, and the H-R diagram on the right, with temperature
             # vs. flux
 
             gs = gridspec.GridSpec(2, 2)
-        
+
             # kT - flux plot
             ax0 = fig.add_subplot(gs[:,1])
             kT_err = np.stack((bdata['kT']-bdata['kT_min'],bdata['kT_max']-bdata['kT']))
@@ -1144,10 +1266,10 @@ class Bursts(Minbar):
             ax0.yaxis.set_ticks_position('both')
             ax0.yaxis.set_label_position('right')
             ax0.set_ylabel(ylabel['flux'])
-        
+
             ax1 = fig.add_subplot(gs[0,0])
             plot_param(bdata, ax1, 'flux', ylabel, color)
-        
+
             ax2 = fig.add_subplot(gs[-1,0], sharex=ax1)
             plot_param(bdata, ax2, 'rad', ylabel, color)
             ax2.set_xlabel(xlabel)
@@ -1358,18 +1480,18 @@ class Bursts(Minbar):
         Create an array of distance corrections, 4 pi d^2, for each burst.
         This can be used to easily convert flux to luminosity, assuming
         isotropic X-ray emission and neglecting the bolometric correction
-        
-	Returns correction factor (cm^2), error, distance (kpc, from the
-	:class:`minbar.Source` table), error. Furthermore, these arrays
-        are stored and can be accessed as ``self['fieldname']``, with
-        ``'fieldname'`` one of ``distcor``, ``distcore``, ``dist``, ``diste``.
+
+	    :return: correction factor (cm^2), error, distance (kpc, from the
+	      :class:`minbar.Source` table), error. Furthermore, these arrays
+          are stored and can be accessed as ``self['fieldname']``, with
+          ``'fieldname'`` one of ``distcor``, ``distcore``, ``dist``, ``diste``.
         """
         s = Sources()
         dist = np.zeros(len(self.records))
         diste = np.zeros_like(dist)
         cor = np.zeros_like(dist)
         core = np.zeros_like(dist)
-        
+
         names = self.records.field('name')
         for name in self.names:
             s.name_like(name.strip(), verbose=False)
@@ -1377,19 +1499,21 @@ class Bursts(Minbar):
                 ind = names==name
                 dist[ind] = s['dist']
                 diste[ind] = s['diste']
+            else:
+                logger.error('no entry in Sources table for {}'.format(name))
             s.clear()
-        
+
         cor = 4*np.pi*(dist*kpc)**2
         ind = dist>0.0 # Prevent division by 0 in next line
         core[ind] = cor[ind]*2.0*diste[ind]/dist[ind]
-        
+
         self.dist = dist
         self.diste = diste
         self.distcor = cor
         self.distcore = core
-        
+
         return cor, core, dist, diste
-    
+
     def clean(self, ucxbs=True, high_mdot=True, gx354=True, rapidburster=True, clear=True, fishy=True):
         """
         Exclude (groups of) sources, such as UCXBs, sources with high mdot (Cyg X-2
@@ -1398,23 +1522,23 @@ class Bursts(Minbar):
         """
         if clear:
             self.clear()
-        
+
         if rapidburster:
             self.exclude('MXB 1730-335') # Rapid burster
-        
+
         if gx354:
             self.exclude('4U 1728-34') # GX 354-0, close to rapid burster and possible UCXB
-        
+
         if ucxbs:
             # Exclude (candidate) UCXBs
             for name in UCXBS:
                 self.exclude(name)
-        
+
         if high_mdot:
             # Exclude systems that accrete near the Eddington limit
             self.exclude('GX 17+2')
             self.exclude('Cyg X-2') # type-II bursts?
-        
+
         if fishy:
             self.exclude('4U 1746-37') # Possibly 2 sources
             self.exclude('EXO 1745-248') # Possibly Type II
@@ -1424,7 +1548,7 @@ class Observations(Minbar):
     """
     Class with the MINBAR observations (and also the bursts)
     """
-    
+
     timefield = 'tstart' # The field used for determining time order
     entryname = 'observation'
 
@@ -1513,7 +1637,7 @@ class Observations(Minbar):
 
         # by default, we adopt the flux range for the table data; if we're
         # reading in lightcurves later on this may be modified
-        yrange = (min(self['flux']-self['e_flux']), 
+        yrange = (min(self['flux']-self['e_flux']),
                 max(self['flux']+self['e_flux']))
 
         if (len(set(self['name'])) > 1):
@@ -1540,7 +1664,7 @@ class Observations(Minbar):
                 _label = label[_instr]
                 for _id in self['entry'][_s]:
                     _obs = Observation(self[_id])
-                    _obs.plot(fig, show=False, show_bursts=False, 
+                    _obs.plot(fig, show=False, show_bursts=False,
                         label=_label, color=colors[_instr])
                     # have to calculate the yrange progressively here with
                     # each lightcurve
@@ -1647,7 +1771,7 @@ class Observation:
             # self.tstart = obs_entry['tstart']
             # self.tstop = obs_entry['tstop']
             # Copy all the columns to the new object. NOTE this will include
-            # the instrument label, which will be overwritten with the 
+            # the instrument label, which will be overwritten with the
             # instrument object, below; but we keep the label by specifying it
             # as a configuration/camera above
             for col in obs_entry.columns:
@@ -1762,7 +1886,7 @@ class Observation:
 
         :param figure: existing figure to add to, if multiple observations are
           to be plotted on the same axis (for example)
-        :param show: display the figure immediately or not (latter case for 
+        :param show: display the figure immediately or not (latter case for
           multiple observations to be plotted together)
         :return: plot object
         """
@@ -1777,7 +1901,7 @@ class Observation:
         if self.time is None:
             logger.info('Showing schematic plot for flux')
             ylabel = 'Flux (3-25 keV, $10^{-9}\ \rm{erg\,cm^{-2}\,s^{-1}$)'
-            plt.errorbar(0.5*(self.tstart+self.tstop), self.flux, 
+            plt.errorbar(0.5*(self.tstart+self.tstop), self.flux,
                 xerr=0.5*(self.tstop-self.tstart), yerr=self.e_flux, **kwargs)
             rate_max = (self.flux+self.e_flux).value
             rate_range = rate_max
@@ -1800,7 +1924,7 @@ class Observation:
 
         if hasattr(self, 'bursts') & show_bursts:
             # also plot the bursts
-            plt.plot(self.bursts['time'], 
+            plt.plot(self.bursts['time'],
                 rate_max+0.05*rate_range * np.full(len(self.bursts), 1), sym_burst)
         if show:
             plt.show()
@@ -1845,7 +1969,7 @@ class Observation:
                     # PCA data are sometimes split over multiple paths, so
                     # try to find those here
                     i, path_arr = 0, [path]
-                    while (os.path.isdir(path+str(i))): 
+                    while (os.path.isdir(path+str(i))):
                         path_arr.append(path+str(i))
                         i +=1
                     # if no additional directories are found, this routine will
@@ -1855,7 +1979,7 @@ class Observation:
             else:
                 logger.warning('directory {} not found locally'.format(path))
                 return None
-  
+
 
         return None
 
@@ -2090,7 +2214,7 @@ class Sources:
     """
     Contains all information on the sources present in MINBAR, via
     the file minbar_sources.fits.
-    
+
     Example:
 
     | s = Sources()
@@ -2100,34 +2224,109 @@ class Sources:
     | ra = s['ra_obj'] # Right ascension for selected source only
     | s.clear() # Clear selection
     """
-    
-    def __init__(self, filename=None, X=0.0, Gaia=True):
+
+    def __init__(self, source='fits', filename=None, X=0.0, Gaia=True):
         """
-        Load source list from FITS file.
+        Load source list from FITS file, or the database.
+
+        :param source: source of data to load; allowed options are 'fits' and 'db'
+        :param filename: alternative filename for the FITS data
+        :param X: assumed H-fraction for distances, passed to get_distances
+        :param Gaia: passed to get_distances
+
+        :return: None
         """
+
         if filename==None:
             filename = self.get_default_path()
-        self._f = fits.open(filename)
-        self.header = self._f[1].header
-        self.field_names = [i.lower() for i in self._f[1].data.dtype.names]
-        self.field_labels = self._get_field_labels()
-        self._fits_names = list(self.field_names) # Keep track of which fields are in fits file
+        if (source == 'db') & (os.path.exists('/'.join((MINBAR_DR2,'minbar.db')))):
+            # here we can load in the data from the database
+            con = connect_db()
+            self.table = pd.read_sql_query('SELECT * FROM sources', con).applymap(lambda x: x.strip() if isinstance(x, str) else x)
+            con.close()
+            self.header = None
+            self.field_names = {i.lower(): i for i in self.table.columns}
+            self.version = '3.0+'
+            self.field_labels = {'name': 'Source name',
+                'recno': 'Record no. in the Liu & van Paradijs (2007) table (starting from 1)',
+                'name_2': 'Source name in the Liu & van Paradijs (2007) table',
+                'separation': 'Distance between matched objects along a great circle (arcsec)',
+                'type': '[ABCDEGIMOPRSTZ ?,()] X-ray type (adapted from Liu & van Paradijs 2007)',
+                'type_old': 'Original type field from Liu & van Paradijs (2007) table',
+                'source_id': 'INTEGRAL SOURCE_ID',
+                'ra_obj': 'Source right ascension (deg)',
+                'dec_obj': 'Source declination (deg)',
+                'err_rad': 'Source positional error (deg)',
+                'ra_orig': 'R.A. (J2000) from Liu & van Paradijs (2007) (deg)',
+                'dec_orig': 'R.A. (J2000) from Liu & van Paradijs (2007) (deg)',
+                'err_orig': 'Positional error (deg)',
+                'comments': 'Alternative names for the source, host cluster etc.',
+                'bibcode': 'Bibliographic code for source discovery',
+                'biblabel': 'Label corresponding to bibcode',
+                'nh': 'Neutral column density towards the source (10^22 cm^-2)',
+                'nh_err':'Error on neutral column density',
+                'nh_bibcode': 'Bibliographic code for neutral column density',
+                'nh_biblabel': 'Label corresponding to bibcode for neutral column density',
+                'day_id': 'INTEGRAL DAY_ID (d)',
+                'class': 'INTEGRAL CLASS',
+                'porb': 'Orbital period (h)',
+                'porb_flag': 'Qualifier on orbital period, e.g. ? for a candidate value',
+                'porb_bibcode': 'Bibliographic reference code for orbital period measurement',
+                'porb_biblabel': 'Label corresponding to orbital period reference',
+                'vmag': 'V magnitude',
+                'l_fx': 'Limit flag on FX',
+                'fx': 'Maximum X-ray flux from Liu & van Paradijs (2007) (deg)',
+                'nburst': 'Number of bursts in MINBAR DR1',
+                'nobs': 'Number of observations in MINBAR DR1',
+                'exp': 'Total exposure for observations in MINBAR DR1 (ks)',
+                'err_conf': '% confidence level for positional error',
+                'pos_method': 'Method by which position was determined, e.g. optical, Chandra etc.',
+                'pos_bibcode': 'Bibliographic reference code for positional measurement',
+                'pos_biblabel': 'Label corresponding to positional measurement reference',
+                'disc': 'String giving instrument, year for discovery of burst behaviour',
+                'disc_bibcode': 'Bibliographic code for discovery of burst behaviour',
+                'disc_biblabel': 'Label for discovery of burst behaviour reference',
+                'rate': 'Average burst rate from MINBAR DR1 (hr^-1)'}
+
+        elif (source == 'fits') & (os.path.exists(filename)):
+            # read in the source table from the FITS file
+            _f = fits.open(filename) # not keeping it open anymore, so don't need to keep it with the object
+            self.header = _f[1].header
+            # want to be able to access the field names by lower case, so define a dict here
+            # self.field_names = [i.lower() for i in self._f[1].data.dtype.names]
+            self.field_names = {i.lower(): i for i in _f[1].data.dtype.names}
+            # TODO need to fix the field labels in the FITS file, as they're a bit mixed up
+            self.field_labels = self._get_field_labels()
+            self._fits_names = list(self.field_names) # Keep track of which fields are in fits file
+            # Create the pandas DataFrame from the FITS data, and strip trailing whitespace
+            self.table = pd.DataFrame.from_records(_f[1].data,
+                                                   exclude=['SPA_PARS','SPE_PARS','VAR_PARS','E_MIN','E_MAX','FLUX','FLUX_ERR']
+                                                   ).applymap(lambda x: x.strip() if isinstance(x, str) else x)
+            _f.close()
+
+            # Extract the version information
+
+            version_string = [x for x in self.header['history'] if re.search('minbar_sources.fits', x)][0]
+            self.version = version_string[26:]
+        else:
+            logger.error('can''t find source list file to read in source table, and/or source={} not known'.format(source))
+            return
+
         self.clear()
+
         # Now has a bit more information about the distances
         # self.dist, self.diste = self.get_distances(X=X, Gaia=Gaia)
-        self.dist, self.diste, self.diste_lo, self.dist_method = self.get_distances(X=X, Gaia=Gaia)
-        self.field_names += ['dist', 'diste','diste_lo','dist_method']
+        # self.dist, self.diste, self.diste_lo, self.dist_method = self.get_distances(X=X, Gaia=Gaia)
+        self.table['dist'], self.table['diste'], self.table['diste_lo'], self.table['dist_method'] = self.get_distances(X=X, Gaia=Gaia)
+        # self.field_names += ['dist', 'diste','diste_lo','dist_method']
+        for _name in ['dist', 'diste','diste_lo','dist_method']:
+            self.field_names[_name] = _name
         self.field_labels['dist'] = 'Distance (kpc)'
         self.field_labels['diste'] = 'Error on distance (kpc)'
         self.field_labels['diste_lo'] = 'Lower error on distance (kpc, where defined)'
         self.field_labels['diste_method'] = 'Distance method'
         self.X = X
         self.Gaia = Gaia
-
-        # Extract the version information
-
-        version_string = [x for x in self.header['history'] if re.search('minbar_sources.fits', x)][0]
-        self.version = version_string[26:]
 
         # Get the Eddington flux information. This step is kind of a hack since
         # the fluxes should really be included in the source FITS file.
@@ -2137,36 +2336,67 @@ class Sources:
             self.local_files = False
         else:
             self.local_files = True
+            # TODO make this part of the table too, but check the ordering
             self.F_Edd, self.F_Edd_err = F_Edd
 
+        # some quick checks
+        all_disc = set([x[:3] for x in self['disc']])
+        for disc in all_disc:
+            if (disc not in DISC_INSTR.keys()):
+                logger.warning('unknown discovery instrument {}'.format(disc))
 
-    def get_default_path(self):
+        all_types = set(''.join(self['type'].values))
+        for type in all_types:
+            if (type not in TYPE_NAMES.values()) & (type != '?'):
+                logger.warning('unknown type ''{}'''.format(type))
+
+        self.has_all_labels = True
+        for _col in self.table.columns:
+            if _col.lower() not in self.field_names.keys():
+                self.has_all_labels = False
+                logger.warning('missing field label for column {}'.format(_col))
+
+        self.has_extra_labels = False
+        for _col in self.field_names.keys():
+            if self.field_names[_col] not in self.table.columns:
+                self.has_extra_labels = True
+                # this is not a problem, as we omit (for example) SPA_PARS, so don't report
+                # logger.warning('spurious extra field label for column {}'.format(_col))
+
+
+    def get_default_path(self, file='minbar_sources.fits'):
         """
         Return the default path of the source list
         """
-        return os.path.join(os.path.dirname(__file__), 'data', 'minbar_sources.fits')
+
+        return os.path.join(os.path.dirname(__file__), 'data', file)
 
 
     def _get_field_labels(self):
         """
         Get the field labels from the comment fields in the fits header
         """
+
         columns = [field[5:] for field in self.header if field.startswith('TTYPE')]
         field_labels = {}
         for column in columns:
             label = self.header.get('TCOMM'+column, self.header['TTYPE'+column])
+            # print (self.header['TTYPE'+column].lower(), column, label)
             unit = self.header.get('TUNIT'+column, '')
             if unit:
                 label = '{} ({})'.format(label, unit)
             field_labels[self.header['TTYPE'+column].lower()] = label
+
         return field_labels
 
 
     def __len__(self):
         """
         Return the number of entries
+        I think this is now redundant that we store the table as a Pandas table, but keep it for now
         """
-        return self._f[1].data.shape[0]
+        # return self._f[1].data.shape[0]
+        return len(self.table)
 
 
     def get(self, field, all=False):
@@ -2176,11 +2406,15 @@ class Sources:
         :param field: field name to return
         :param all: whether to return all values or only the current selection
         """
-        if field.lower() in self._fits_names:
-            data = self._f[1].data[field]
-        else: # If not in the fits file, see if it is an attribute
-            data = getattr(self, field)
-        
+
+        # if field.lower() in self._fits_names:
+        if field.lower() in self.field_names.keys():
+        # data = self._f[1].data[field]
+            data = self.table[self.field_names[field.lower()]]
+        else:
+            # If not in the fits file, see if it is an attribute
+            return getattr(self, field)
+
         if all or self.selection is None:
             return data
         else:
@@ -2191,7 +2425,9 @@ class Sources:
         """
         Return field with given name. See :meth:`minbar.Sources.get`.
         """
+
         return self.get(field)
+
 
     def type(self, types):
         """
@@ -2202,15 +2438,12 @@ class Sources:
         :param types: one or more letters corresponding to the type code in the Sources table, e.g. 'A' for atoll, 'C' for ultracompact etc.
         :return: number of sources matching selection
         """
-        type_names = {'atoll': 'A', 'atolls': 'A', 'ultracompact': 'C', 'UCXB': 'C', 'dipper': 'D',
-                      'dippers': 'D', 'eclipsing': 'E', 'globular': 'G', 'cluster': 'G',
-                      'intermittent': 'I', 'microquasar': 'M', 'oscillation': 'O', 'pulsar': 'P',
-                      'pulsars': 'P', 'radio': 'R', 'superburst': 'S', 'transient': 'T',
-                      'transients': 'T', 'burster': 'B', 'bursters': 'B'}
-        if types in type_names:
-            types=type_names[types]
 
-        src_types = self._f[1].data['type']
+        if types in TYPE_NAMES:
+            types=TYPE_NAMES[types]
+
+        # src_types = self._f[1].data['type']
+        src_types = self.table['Type'].values
         sel = np.array([types[:1] in x for x in src_types])
         for type in types[1:]:
             sel = (sel & [type in x for x in src_types])
@@ -2226,11 +2459,14 @@ class Sources:
         """
         name = name.lower()
         selection = []
-        for i, (name1, name2) in enumerate(zip(self._f[1].data['name'], self._f[1].data['name_2'])):
+        # for i, (name1, name2) in enumerate(zip(self._f[1].data['name'], self._f[1].data['name_2'])):
+        for i, (name1, name2) in enumerate(zip(self.table['NAME'].values, self.table['Name_2'].values)):
             if name1.lower().find(name)>-1:
                 selection.append(i)
-            elif name2.lower().find(name)>-1:
-                selection.append(i)
+            elif name2 is not None:
+                if name2.lower().find(name)>-1:
+                    selection.append(i)
+
         return np.array(selection)
 
 
@@ -2243,7 +2479,7 @@ class Sources:
         if len(ind)>0:
             self.selection = ind[0]
             if verbose:
-                logger.info('Selected source {}'.format(self['name']))
+                logger.info('Selected source {}'.format(self['NAME']))
                 if len(ind)>1:
                     logger.info('{} more matching sources: {}'.format(len(ind) - 1, ', '.join(self.get('name', True)[ind[1:]])))
         else:
@@ -2277,9 +2513,9 @@ class Sources:
 
         # Map Eddington fluxes onto the name array, as for the distances
 
-        F_Edd = np.zeros_like(self['ra_obj'])
+        F_Edd = np.zeros(len(self))
         F_Edd_Err = np.zeros_like(F_Edd)
-        for i, name in enumerate(self['name']):
+        for i, name in enumerate(self['NAME']):
             if name in d.index:
                 F_Edd[i] = d.loc[name]['F_Edd']
                 F_Edd_Err[i] = d.loc[name]['F_Edd_Err']
@@ -2290,16 +2526,16 @@ class Sources:
 
     def get_distances(self, X=0.0, Gaia=True):
         """
-        Create an array of distances for all sources in self.name
+        Create an array of distances for all sources in the Sources table (where available)
         
-        Distances taken from Table 8 of the MINBAR paper, which includes
+        Distances taken from Table 8 of the MINBAR paper (here as TABLE8), which includes
         distances derived from the Eddington flux measured for MINBAR
         bursts, as well as distances measured from Gaia and other sources
 
         :param X: assumed H-fraction for Eddington luminosity calculation (default is 0.0)
         :param Gaia: boolean, set to True to adopt distances from Gaia parallax over calculated values from PRE bursts
 
-        :return: arrays dist, diste_hi, diste_lo, dist_method, giving the distances and limits (kpc) and the method
+        :return: arrays dist, diste_hi, diste_lo, dist_method, ordered as for the source names, giving the distances and limits (kpc) and the method
         """
 
         idist = 3 # index for distances to adopt
@@ -2309,91 +2545,9 @@ class Sources:
         elif X == 0.7:
             idist = 2
 
-        # The table below defines a "distance tuple" for each source; the components are:
-        # 1. the average peak luminosity and 1-sigma error (in 1E-9 erg/cm^2/s);
-        # 2. the "measured" distance in kpc, with two-sided error (upper and lower), and a string
-        #    indicating the source;
-        # 3. the distance in kpc inferred from the peak Eddington flux for X=0.7, and 1-sigma error;
-        # 4. the distance in kpc inferred from the peak Eddington flux for X=0.0, and 1-sigma error
-        # The flags to this routine are used to populate the (simpler) array distances
-
-        table8 = {  '4U 0513-40': ((14.4, 6.7), (10.32, 0.2, -0.24, '1'), (8.5, 1.5), (11.1, 1.9)),
-                    '4U 0614+09': ((266.0, 6.0), (3.27, 2.42, -1.3, 'G'), (1.99, 0.02), (2.59, 0.03)),
-                    'EXO 0748-676': ((46.5, 4.3), (0.0, 0.0, -0.0, ''), (4.7, 0.2), (6.2, 0.3)),
-                    '4U 0836-429': ((0.0, 0.0), (3.18, 2.25, -1.4, 'G'), (0.0, 6.9), (0.0, 9.0)),
-                    '2S 0918-549': ((119.1, 14.4), (5.77, 2.77, -1.6, 'G'), (3.0, 0.2), (3.9, 0.2)),
-                    '4U 1246-588': ((120.3, 11.9), (2.03, 2.37, -1.17, 'G'), (3.0, 0.1), (3.8, 0.2)),
-                    '4U 1254-69': ((0.0, 0.0), (3.18, 3.16, -1.33, 'G'), (0.0, 6.0), (0.0, 7.9)),
-                    'SAX J1324.5-6313': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.7), (0.0, 6.1)),
-                    '4U 1323-62': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 5.2), (0.0, 6.8)),
-                    'Cir X-1': ((0.0, 0.0), (6.17, 2.86, -1.96, 'G'), (0.0, 13.6), (0.0, 17.7)),
-                    '4U 1608-522': ((169.0, 41.2), (5.8, 1.8, -2.0, '2'), (2.5, 0.3), (3.2, 0.3)),
-                    '4U 1636-536': ((72.5, 18.8), (4.42, 3.08, -1.63, 'G'), (3.8, 0.4), (5.0, 0.5)),
-                    'XTE J1701-462': ((43.4, 1.4), (0.0, 0.0, -0.0, ''), (4.9, 0.1), (6.4, 0.1)),
-                    'MXB 1658-298': ((17.0, 15.9), (0.0, 0.0, -0.0, ''), (7.9, 2.2), (10.2, 2.9)),
-                    '4U 1702-429': ((88.7, 45.0), (0.0, 0.0, -0.0, ''), (3.4, 0.6), (4.5, 0.8)),
-                    '4U 1705-32': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.4), (0.0, 5.7)),
-                    '4U 1705-44': ((41.3, 17.5), (0.0, 0.0, -0.0, ''), (5.0, 0.8), (6.6, 1.1)),
-                    'XTE J1709-267': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 2.7), (0.0, 3.6)),
-                    'XTE J1710-281': ((7.1, 1.8), (0.0, 0.0, -0.0, ''), (12.2, 1.3), (15.9, 1.7)),
-                    'SAX J1712.6-3739': ((76.0, 46.9), (0.0, 0.0, -0.0, ''), (3.7, 0.8), (4.8, 1.0)),
-                    '2S 1711-339': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.9), (0.0, 6.4)),
-                    'RX J1718.4-4029': ((47.2, 6.2), (0.0, 0.0, -0.0, ''), (4.7, 0.3), (6.1, 0.4)),
-                    'IGR J17191-2821': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 5.9), (0.0, 7.7)),
-                    'XTE J1723-376': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 3.7), (0.0, 4.8)),
-                    '4U 1722-30': ((61.8, 16.6), (7.4, 0.5, -0.5, '3,4,5'), (4.1, 0.5), (5.4, 0.6)),
-                    '4U 1728-34': ((94.0, 35.9), (0.0, 0.0, -0.0, ''), (3.3, 0.5), (4.4, 0.7)),
-                    'MXB 1730-335': ((28.0, 7.0), (7.87, 0.56, -0.5, '5'), (6.1, 0.6), (8.0, 0.8)),
-                    'KS 1731-260': ((50.5, 20.4), (0.0, 0.0, -0.0, ''), (4.6, 0.7), (5.9, 0.9)),
-                    'SLX 1735-269': ((52.9, 21.0), (0.0, 0.0, -0.0, ''), (4.5, 0.7), (5.8, 0.9)),
-                    '4U 1735-444': ((34.2, 22.0), (5.65, 3.62, -2.14, 'G'), (5.5, 1.2), (7.2, 1.6)),
-                    'XTE J1739-285': ((0.0, 0.0), (4.06, 4.25, -2.44, 'G'), (0.0, 6.1), (0.0, 7.9)),
-                    'SLX 1737-282': ((68.1, 12.4), (0.0, 0.0, -0.0, ''), (3.9, 0.3), (5.1, 0.4)),
-                    'KS 1741-293': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.2), (0.0, 5.4)),
-                    'GRS 1741.9-2853': ((35.3, 9.8), (0.0, 0.0, -0.0, ''), (5.5, 0.6), (7.1, 0.8)),
-                    '1A 1742-294': ((37.7, 1.3), (0.0, 0.0, -0.0, ''), (5.3, 0.1), (6.9, 0.1)),
-                    'SAX J1747.0-2853': ((52.7, 31.4), (0.0, 0.0, -0.0, ''), (4.5, 0.9), (5.8, 1.2)),
-                    'IGR J17473-2721': ((113.6, 11.7), (0.0, 0.0, -0.0, ''), (3.0, 0.1), (4.0, 0.2)),
-                    'SLX 1744-300': ((13.7, 3.2), (0.0, 0.0, -0.0, ''), (8.7, 0.9), (11.4, 1.1)),
-                    'GX 3+1': ((53.3, 15.2), (0.0, 0.0, -0.0, ''), (4.4, 0.5), (5.8, 0.7)),
-                    'IGR J17480-2446': ((36.1, 9.0), (6.9, 0.5, -0.5, '3,4,6'), (5.4, 0.6), (7.0, 0.7)),
-                    '1A 1744-361': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 7.0), (0.0, 9.1)),
-                    'SAX J1748.9-2021': ((38.0, 6.1), (8.4, 1.5, -1.3, '3,4'), (5.3, 0.4), (6.9, 0.5)),
-                    'EXO 1745-248': ((63.4, 10.9), (6.9, 0.5, -0.5, '3,4,6'), (4.1, 0.3), (5.3, 0.4)),
-                    'IGR J17498-2921': ((51.6, 1.6), (0.0, 0.0, -0.0, ''), (4.5, 0.1), (5.9, 0.1)),
-                    '4U 1746-37': ((5.4, 0.8), (0.0, 0.0, -0.0, ''), (13.9, 1.0), (18.2, 1.3)),
-                    'SAX J1750.8-2900': ((54.3, 6.1), (0.0, 0.0, -0.0, ''), (4.4, 0.2), (5.7, 0.3)),
-                    'GRS 1747-312': ((13.4, 7.3), (6.7, 0.5, -0.5, '3,4,6'), (8.8, 1.7), (11.5, 2.2)),
-                    'IGR J17511-3057': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.1), (0.0, 5.4)),
-                    'SAX J1752.3-3138': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 6.8), (0.0, 8.9)),
-                    'SAX J1753.5-2349': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.4), (0.0, 5.7)),
-                    'IGR J17597-2201': ((15.7, 0.8), (0.0, 0.0, -0.0, ''), (8.2, 0.2), (10.7, 0.3)),
-                    'SAX J1806.5-2215': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.8), (0.0, 6.2)),
-                    '2S 1803-245': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 4.2), (0.0, 5.4)),
-                    'SAX J1808.4-3658': ((230.2, 26.3), (0.0, 0.0, -0.0, ''), (2.1, 0.1), (2.8, 0.1)),
-                    'XTE J1810-189': ((54.2, 1.8), (0.0, 0.0, -0.0, ''), (4.4, 0.1), (5.7, 0.1)),
-                    'SAX J1810.8-2609': ((111.3, 7.2), (0.0, 0.0, -0.0, ''), (3.1, 0.1), (4.0, 0.1)),
-                    'XMMU J181227.8-181234': ((2.4, 0.3), (14.0, 2.0, -2.0, '7'), (20.9, 1.2), (27.2, 1.5)),
-                    'XTE J1814-338': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 8.6), (0.0, 11.3)),
-                    '4U 1812-12': ((203.1, 40.1), (0.0, 0.0, -0.0, ''), (2.3, 0.2), (3.0, 0.3)),
-                    'GX 17+2': ((14.6, 5.0), (0.0, 0.0, -0.0, ''), (8.5, 1.2), (11.1, 1.5)),
-                    'SAX J1818.7+1424': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 5.9), (0.0, 7.7)),
-                    '4U 1820-303': ((60.5, 22.6), (7.6, 0.4, -0.4, '3,4,8'), (4.2, 0.6), (5.4, 0.8)),
-                    'SAX J1828.5-1037': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 5.8), (0.0, 7.6)),
-                    'GS 1826-24': ((40.0, 3.0), (0.0, 0.0, -0.0, ''), (5.1, 0.2), (6.7, 0.2)),
-                    'XB 1832-330': ((33.8, 4.5), (9.6, 0.4, -0.4, '3,4,9'), (5.6, 0.3), (7.3, 0.4)),
-                    'Ser X-1': ((29.4, 13.8), (4.31, 2.54, -1.61, 'G'), (6.0, 1.0), (7.8, 1.4)),
-                    'HETE J1900.1-2455': ((123.9, 8.6), (0.0, 0.0, -0.0, ''), (2.9, 0.1), (3.8, 0.1)),
-                    'Aql X-1': ((103.3, 19.6), (2.97, 2.64, -1.32, 'G'), (3.2, 0.3), (4.2, 0.3)),
-                    'XB 1916-053': ((30.6, 3.5), (0.0, 0.0, -0.0, ''), (5.8, 0.3), (7.6, 0.4)),
-                    'XTE J2123-058': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 12.3), (0.0, 16.0)),
-                    'M15 X-2': ((40.8, 7.2), (10.38, 0.15, -0.15, '1'), (5.1, 0.4), (6.6, 0.5)),
-                    'Cyg X-2': ((13.1, 2.3), (6.95, 1.16, -0.91, 'G'), (8.9, 0.7), (11.6, 0.9)),
-                    'SAX J2224.9+5421': ((0.0, 0.0), (0.0, 0.0, -0.0, ''), (0.0, 6.0), (0.0, 7.9)) }
-
         # also define a string which determines how the distance was derived
-        distances = { x: (table8[x][1] if (table8[x][1][0] > 0.0 and Gaia) 
-            else table8[x][idist]) for x in table8 }
+        distances = { x: (TABLE8[x][1] if (TABLE8[x][1][0] > 0.0 and Gaia)
+            else TABLE8[x][idist]) for x in TABLE8 }
 
         # logger.warning('distances are outdated, use with caution')
         addl = ''
@@ -2402,11 +2556,12 @@ class Sources:
 
         logger.info('adopted distances for X={}{}'.format( X, addl))
 
-        dist = np.zeros_like(self['ra_obj'])
+        # dist = np.zeros_like(self['ra_obj'])
+        dist = np.zeros(len(self))
         diste_hi = np.zeros_like(dist)
         diste_lo = np.zeros_like(dist)
         dist_method = np.empty(len(dist), dtype="<U10")
-        for i, name in enumerate(self['name']):
+        for i, name in enumerate(self['NAME']):
             if name in distances:
                 dist[i] = distances[name][0]
                 if len(distances[name]) == 2:
@@ -2427,6 +2582,7 @@ class Sources:
         Display some information about this object
         The "local files" option refers to auxiliary information including the
         list of Eddington fluxes, which is not part of the online dataset
+
         :return:
         """
 
@@ -2437,13 +2593,13 @@ class Sources:
             if n_sel == 1:
                 sel_str = "{} selected ({}".format(n_sel, self['name'])
             else:
-                sel_str = "{} selected ({}".format(n_sel, ", ".join(self['name'][:min([3,n_sel])]) )
+                sel_str = "{} selected ({}".format(n_sel, ", ".join(self['name'].iloc[:min([3,n_sel])]) )
             if n_sel > 4:
                 sel_str += " ... "
             elif n_sel == 4:
                 sel_str += ", "
             if n_sel > 3:
-                sel_str += self['name'][-1]
+                sel_str += self['name'].iloc[-1]
             sel_str += ")\n"
 
         # the "Local files" option here refers only to the F_Edd file, which is not part of the
@@ -2456,7 +2612,8 @@ class Sources:
 Local files: {}""".format( self.version, len(self),
                            # this version will include the selection
                            # len(np.where(self['nburst'] > 0)[0]),
-                           len(np.where(self._f[1].data['nburst'] > 0)[0]),
+                           # len(np.where(self._f[1].data['nburst'] > 0)[0]),
+                           len(np.where(self.table['nburst'] > 0)[0]),
                            sel_str,
                            available[int(self.local_files)])
 

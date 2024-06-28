@@ -169,7 +169,7 @@ def write_wiki_csv(outfile='minbar_sources_new.csv', con=None):
     """
 
     new_connection = False
-    if con is None
+    if con is None:
         con = connect_db()
         new_connection = True
 
