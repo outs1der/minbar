@@ -26,6 +26,72 @@ def idlwhere(bool):
     return i, len(i), not_i
 
 
+def tmatch(t1, t2, exclusive=False, thresh=None):
+    '''
+    Function to return the indices of array t2 that are the closest to the
+    values of t1. Adapted from tmatch.pro
+
+    The exclusive option may not always get the optimal list, since we can
+    do replacements where the original best match is set as unmatched (even
+    when it might be a better match to one of events in t2 which was
+    matched to a different event in t1)
+    
+    :param thresh: match only if the offset is less than this value
+    :param exclusive: when True, only match each entry in t2 once
+    
+    :return: indices for matches, array of offsets, and array of unmatched elements in t2
+    '''
+
+    n = len(t1)
+    offset = np.zeros(n)
+    xid = [None] * n
+
+    matched = np.zeros(len(t2))
+    
+    for i in range(n):
+        # Loop over each element of t1 and rank the nearest elements of t2
+        _imin = np.argsort(np.abs(t1[i]-t2))
+        _offset = np.abs(t1[i]-t2[_imin])
+
+        if (not exclusive) & (_offset[0] < (np.inf if thresh is None else thresh)):
+
+            # We have a match, and don't care about exclusivity
+
+            xid[i] = _imin[0]		# pointer to t1
+            offset[i] = _offset[0]	# offset
+            matched[_imin[0]] += 1	# count of matches in t2
+
+        elif exclusive:
+
+            # work your way down the list of matches
+
+            for j in np.where(_offset < (np.inf if thresh is None else thresh))[0]:
+
+                if (matched[_imin[j]] > 0):
+		    # If we've already matched with this event, BUT the
+		    # current match is better, we can swap
+
+                    _prev = np.where(xid == _imin[j])[0]
+                    assert len(_prev) == 1
+                    if (_offset[j] < offset[_prev[0]]):
+                        xid[_prev[0]], offset[_prev[0]] = None, 0.0
+                        xid[i] = _imin[j]
+                        offset[i] = _offset[j]	# offset
+                        break
+
+                else:
+
+                    xid[i] = _imin[j]
+                    offset[i] = _offset[j]	# offset
+                    matched[_imin[j]] += 1
+                    break
+
+
+    unmatched = np.where(matched == 0)[0]
+            
+    return xid, offset, unmatched
+
+
 def gtiseg(time, maxgap=None, mingti=None):
     """
     NAME:
