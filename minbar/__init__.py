@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.23.0'
+__version__ = '1.24.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -549,7 +549,7 @@ class Minbar(IDLDatabase):
 
     def clear(self):
         """
-	Clear the current selection. If ``self.type`` is not ``None``,
+	    Clear the current selection. If ``self.type`` is not ``None``,
         only bursts of the given type are selected.
         """
         self.name = ''
@@ -2363,6 +2363,39 @@ class Sources:
                 # this is not a problem, as we omit (for example) SPA_PARS, so don't report
                 # logger.warning('spurious extra field label for column {}'.format(_col))
 
+        # set default attributes for show (same as for Table 1 in the DR1 paper)
+
+        self.attributes_default = ['name','disc','type','ra_obj','dec_obj','err_rad','porb','nh','exp','nburst','rate']
+
+    def show(self, attributes=None, all=False):
+        """
+        Display the object in a user-friendly way, equivalent to the Minbar.show
+
+        :param attributes: list of attributes to display; short default list defined in __init__
+        :param all: set to ``True`` to display all the attributes
+
+        :return: nothing
+        """
+
+        if attributes is None:
+            attributes = self.attributes_default
+        else:
+            # check all the attributes are in the field names
+            in_attr_list = True
+            for attr in attributes:
+                in_attr_list = in_attr_list & (attr in self.field_names)
+                # print (attr, in_attr_list)
+            if not in_attr_list:
+                logger.error("attribute not present in table")
+                return
+        print(self)
+        # TODO reconcile selection null value with equivalent for Bursts, Observations (here None indicates no filter)
+        if all:
+            print (self.table[np.full(len(self.table), True) if self.selection is None else self.selection][_labels])
+        else:
+            _labels = [self.field_names[attr] for attr in attributes] # switch to upper case
+            print (self.table[np.full(len(self.table), True) if self.selection is None else self.selection][_labels])
+
 
     def get_default_path(self, file='minbar_sources.fits'):
         """
@@ -2401,16 +2434,27 @@ class Sources:
 
     def get(self, field, all=False):
         """
-        Return value with given field
+        Return value with given field or array of fields
 
-        :param field: field name to return
+        :param field: field name or array of fields to return
         :param all: whether to return all values or only the current selection
         """
 
+        fields_ok = True
+        if np.shape(field) != ():
+            field_trans = []
+            for _field in field:
+                fields_ok = fields_ok & (_field in self.field_names)
+                field_trans.append(self.field_names[_field])
+
+        else:
+            fields_ok = field in self.field_names
+            field_trans = self.field_names[field]
+
+        if fields_ok:
         # if field.lower() in self._fits_names:
-        if field.lower() in self.field_names.keys():
         # data = self._f[1].data[field]
-            data = self.table[self.field_names[field.lower()]]
+            data = self.table[field_trans]
         else:
             # If not in the fits file, see if it is an attribute
             return getattr(self, field)
@@ -2479,7 +2523,7 @@ class Sources:
         if len(ind)>0:
             self.selection = ind[0]
             if verbose:
-                logger.info('Selected source {}'.format(self['NAME']))
+                logger.info('Selected source {}'.format(self['name']))
                 if len(ind)>1:
                     logger.info('{} more matching sources: {}'.format(len(ind) - 1, ', '.join(self.get('name', True)[ind[1:]])))
         else:
@@ -2515,7 +2559,7 @@ class Sources:
 
         F_Edd = np.zeros(len(self))
         F_Edd_Err = np.zeros_like(F_Edd)
-        for i, name in enumerate(self['NAME']):
+        for i, name in enumerate(self['name']):
             if name in d.index:
                 F_Edd[i] = d.loc[name]['F_Edd']
                 F_Edd_Err[i] = d.loc[name]['F_Edd_Err']
@@ -2561,7 +2605,7 @@ class Sources:
         diste_hi = np.zeros_like(dist)
         diste_lo = np.zeros_like(dist)
         dist_method = np.empty(len(dist), dtype="<U10")
-        for i, name in enumerate(self['NAME']):
+        for i, name in enumerate(self['name']):
             if name in distances:
                 dist[i] = distances[name][0]
                 if len(distances[name]) == 2:
