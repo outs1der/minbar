@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.24.0'
+__version__ = '1.24.1'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -2496,6 +2496,7 @@ class Sources:
 
         return len(np.where(sel)[0])
 
+
     def get_name_like(self, name):
         """
         Return a list of source indices that have 'name' in their ``name`` or ``name_2`` fields.
@@ -2518,10 +2519,18 @@ class Sources:
         """
         Select the source with given name. Uses first result from 
         :meth:`minbar.Sources.get_name_like`
+
+        Originally set the selection as the source index, but switched to a
+        boolean array for compatibility with the show method
+
+        :param name: source name or substring to match
+        :param verbose: set to True to show more information about the match
+
+        :return: nothing
         """
         ind = self.get_name_like(name)
         if len(ind)>0:
-            self.selection = ind[0]
+            self.selection = [x == ind[0] for x in np.arange(len(self))]
             if verbose:
                 logger.info('Selected source {}'.format(self['name']))
                 if len(ind)>1:
