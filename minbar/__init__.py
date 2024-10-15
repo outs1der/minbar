@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.24.1'
+__version__ = '1.24.2'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -2313,6 +2313,7 @@ class Sources:
             return
 
         self.source = source
+        self.table.sort_values('RA_OBJ', inplace=True)
         self.clear()
 
         # Now has a bit more information about the distances
