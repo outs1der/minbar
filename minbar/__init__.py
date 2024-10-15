@@ -2213,12 +2213,12 @@ class Observation:
 class Sources:
     """
     Contains all information on the sources present in MINBAR, via
-    the file minbar_sources.fits.
+    the file minbar_sources.fits (DR1) or the database (DR2 and beyond)
 
     Example:
 
     | s = Sources()
-    | print s.field_names # Show available data fields
+    | print (s.field_names) # Show available data fields
     | ra = s['ra_obj'] # Right ascension for all sources
     | s.name_like('1636')
     | ra = s['ra_obj'] # Right ascension for selected source only
@@ -2241,9 +2241,9 @@ class Sources:
             filename = self.get_default_path()
         if (source == 'db') & (os.path.exists('/'.join((MINBAR_DR2,'minbar.db')))):
             # here we can load in the data from the database
-            con = connect_db()
-            self.table = pd.read_sql_query('SELECT * FROM sources', con).applymap(lambda x: x.strip() if isinstance(x, str) else x)
-            con.close()
+            self.con = connect_db()
+            self.table = pd.read_sql_query('SELECT * FROM sources', self.con).applymap(lambda x: x.strip() if isinstance(x, str) else x)
+            self.con.close()
             self.header = None
             self.field_names = {i.lower(): i for i in self.table.columns}
             self.version = '3.0+'
@@ -2312,6 +2312,7 @@ class Sources:
             logger.error('can''t find source list file to read in source table, and/or source={} not known'.format(source))
             return
 
+        self.source = source
         self.clear()
 
         # Now has a bit more information about the distances
@@ -2366,6 +2367,7 @@ class Sources:
         # set default attributes for show (same as for Table 1 in the DR1 paper)
 
         self.attributes_default = ['name','disc','type','ra_obj','dec_obj','err_rad','porb','nh','exp','nburst','rate']
+
 
     def show(self, attributes=None, all=False):
         """
@@ -2496,6 +2498,7 @@ class Sources:
 
         return len(np.where(sel)[0])
 
+
     def get_name_like(self, name):
         """
         Return a list of source indices that have 'name' in their ``name`` or ``name_2`` fields.
@@ -2620,6 +2623,90 @@ class Sources:
                     dist_method[i] = distances[name][3]
 
         return dist, diste_hi, diste_lo, dist_method
+
+
+    def db_update(self, entry, values, execute=True, commit=False):
+        """
+        Function to update the source database
+        TODO: this could probably be set up as a more generic routine, and used for all the databases
+
+        :param entry: identifying information for the entry; can be a string (source name), or identifying dictionary (column plus value)
+        :param values: values to update; dict of column, values
+        :param execute: set to True to actually execute the UPDATE command; False for testing
+        :param commit: set to True to commit
+
+        :return: replaced values AND the connection object IF commit is False, so that you can review and commit later if need be
+        """
+
+        def float_or_esc_string(val):
+            return val if type(val) != str else "'"+"''".join(val.split("'"))+"'"
+
+        db = 'sources'
+        if type(entry) == str:
+            _where = " WHERE NAME='{}'".format(entry)
+        elif type(entry) == dict:
+            # here we can identify a source based on one or more key, value pairs
+            _keys = list(entry.keys())
+            for _key in _keys:
+                if _key.lower() not in self.field_names:
+                    logger.error('column {} not in {} db'.format(_key, db))
+                    return
+            _where = " WHERE {}={}".format(_keys[0], float_or_esc_string(entry[_keys[0]]))
+            for _key in _keys[1:]:
+                _where += " AND {}={}".format(_key, float_or_esc_string(entry[_key]))
+        else:
+            logger.error('can''t identify {} db row based on entry type {}'.format(db, type(entry)))
+            return
+
+        _keys = list(values.keys())
+        for _key in _keys:
+            if _key.lower() not in self.field_names:
+                logger.error('column {} not in {} db'.format(_key, db))
+                return
+        _set = " SET {}={}".format(_keys[0], float_or_esc_string(values[_keys[0]]))
+        for _key in _keys[1:]:
+            _set += ", {}={}".format(_key, float_or_esc_string(values[_key]))
+
+        con = connect_db()
+
+        # print ("SELECT {} FROM sources{}".format(','.join(_keys),_where))
+        existing_values = pd.read_sql_query("SELECT {} FROM {}{}".format(','.join(_keys), db, _where), con)
+        if len(existing_values) == 0:
+            logger.error("entry clause '{}' returns no matches from {} db, can't update".format(_where[1:], db))
+            return
+        elif len(existing_values) > 1:
+            logger.warning("entry clause '{}' matches multiple rows from {} db, proceed with caution!".format(_where[1:], db))
+
+        command = "UPDATE {}{}{}".format(db, _set, _where)
+        print("UPDATE command:\n  {}\nreplacing existing values of columns {}:".format(command, ','.join(_keys)))
+        print(existing_values)
+
+        if execute == False:
+            logger.info('dry run only, UPDATE command not executed')
+            con.close()
+        else:
+                cur = con.cursor()
+                cur.execute('PRAGMA foreign_keys = ON')  # always do this!
+                cur.execute(command)
+                if commit == False:
+                    logger.info('changes not committed!')
+                    return con, existing_values
+                else:
+                    db_commit(con)
+                    con.close()
+
+        return existing_values
+
+
+    def db_commit(self, con):
+        """
+        Commit changes to the database
+
+        :return: nothing
+        """
+
+        con.commit()
+
 
     def __str__(self):
         """

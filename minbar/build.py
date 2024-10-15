@@ -157,6 +157,7 @@ def match_name(name, name2, name3=None, comments=None):
 
     return None
 
+
 def write_wiki_csv(outfile='minbar_sources_new.csv', con=None):
     """
     This routine converts the source table into a form for use on the wiki, at
@@ -203,6 +204,7 @@ def write_wiki_csv(outfile='minbar_sources_new.csv', con=None):
 
     if new_connection:
         con.close()
+
 
 def verify_sources(con):
     """
@@ -263,6 +265,61 @@ def verify_sources(con):
             print('{:<50} {:<7} {:<7}'.format(s['NAME'][m[i]]+' = '+jeans_table['name'][i], jeans_table['Porb'][i], s['Porb'][m[i]]))
 
     return new
+
+
+def update_ref(ref, minbar_id, ref_id=None, execute=True, commit=False):
+    """
+    This routine is to update the burst reference table with new entries
+
+    :param con: connection to the database
+    :param ref: bibliographic string, e.g. alizai23 (last name & 2-digit year, as listed in all.bib)
+    :param minbar_id: list of MINBAR IDs to which the bursts correspond
+    :param ref_id: array of IDs as in the reference; could be strings or letters, or nothing
+    :param execute: set to True to actually execute the INSERT command; False for testing
+    :param commit: set to True to commit
+
+    :return: the connection object IF commit is False, so that you can review and commit later if need be
+    """
+
+    if ref_id is None:
+        ref_id = np.full(len(minbar_id), '')
+    if len(ref_id) != len(minbar_id):
+        minbar.logger.error('ref_id needs to be same length as minbar_id (use blanks if missing)')
+        return
+
+    assert all(isinstance(x, (int, np.int64)) for x in minbar_id)
+    assert (type(ref) == str) & (np.shape(ref) == ())
+
+    # check for existing entries
+    con = connect_db()
+    existing = pd.read_sql_query("SELECT * from burst_ref WHERE ref_code='{}'".format(ref), con)
+    if len(existing) > 0:
+        for ex_entry in existing['entry_minbar']:
+            if ex_entry in minbar_id:
+                minbar.logger.error('ref {} for entry {} already present, #{}'.format(ref, ex_entry,
+                        existing[existing['entry_minbar'] == ex_entry]['entry'].values[0]))
+                return
+
+    # maybe I don't have to generate the index here
+    cur = con.cursor()
+    cur.execute('PRAGMA foreign_keys = ON')  # always do this!
+    # _command = "INSERT INTO burst_ref (ref_code, entry_minbar, ref_id, entry) VALUES (?, ?, ?, ?)"
+    _command = "INSERT INTO burst_ref (ref_code, entry_minbar, ref_id) VALUES (?, ?, ?)"
+    if not execute:
+        print('Dry run:')
+    for i, entry in enumerate(minbar_id):
+        if execute:
+            cur.execute(_command, (ref, entry, ref_id[i]))#, ind[i]))
+        else:
+            print (_command, (ref, entry, ref_id[i]))#, ind[i]))
+
+    if commit == False:
+        minbar.logger.info('changes not committed!')
+        return con
+    else:
+        con.commit()
+        con.close()
+
 
 # This group of functions are intended to work on observations and candidate events from
 # any instrument; need to pass only enough information e.g. lightcurve path(s), candidate
