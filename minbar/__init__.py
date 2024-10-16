@@ -35,6 +35,7 @@ import os, re
 from astropy.io import fits, ascii
 import astropy.units as u
 from astropy.time import Time
+from astropy.table import Table
 from datetime import datetime
 import logging
 import sys
@@ -393,9 +394,12 @@ You should check your source to directory name mapping""".format(nonmatched, nmi
 class Minbar(IDLDatabase):
     """
     This class is provided to access MINBAR burst or observation data
-    EITHER from the MRT tables (publicly available) or from the original
-    IDL database files.  Methods here are common to both
+    EITHER from the original IDL database files, the (publicly available)
+    MRT tables or from the (DR2 and beyond) SQLite3 databases.
+    Methods here are common to both
     :class:`minbar.Bursts` and :class:`minbar.Observations` classes
+
+    TODO: for DR2 and beyond, no need to base this on the IDLDatabase class
 
     Visibility is controlled by the ``selection`` attribute, which indicates
     which of the table entries are selected for display or data extraction
@@ -404,29 +408,45 @@ class Minbar(IDLDatabase):
     default time ordering
     """
 
-    def __init__(self, filename=None, IDL=False):
+    def __init__(self, source='txt', table=None):
+        """
+        Initialise a Minbar class (Bursts or Observations).
+        Default is to use the text files, released with DR1
 
-        if filename==None:
+        :param table: specifies whether you're generating a Bursts ('minbar') or Observations ('minbar-obs') object
+        :param source: one of 'txt', 'idl', 'db'
+        """
+
+        if table==None:
             # If no filename specified, then choose the bursts
-            filename = self.get_default_path('minbar')
+            table = 'minbar'
 
-        if not IDL:
-            filename += '.txt'
+        # common attributes to generate:
+        #   records - actual data for the table
+        #   field_labels - dictionary of names, descriptions
+        #   field_names - just the field names
+        #   field_format - not used
+        if (source == 'db') & (os.path.exists('/'.join((MINBAR_DR2, 'minbar.db')))):
+            # Read in the database version, for DR2 and beyond
+            # Observations db is minbar_obs, not minbar-obs
+            table = '_'.join(table.split('-'))
 
-        if IDL:
-            # Read in the IDL version of the database
-            IDLDatabase.__init__(self, filename)
+            self.con = connect_db()
+            table = pd.read_sql_query('SELECT * FROM {}'.format(table), self.con).applymap(lambda x: x.strip() if isinstance(x, str) else x)
+            self.records = Table.from_pandas(table)
+            self.con.close()
+            self.header = None
+            self.field_names = list(self.records.columns)
+            self.version = 'DR1+'
 
-            self.fix_labels()
+            # field_labels is not set here, so we do that in the child class (Bursts/Observations)
 
-        else:
+        elif source == 'txt':
             # read in the MRT version, and fake the rest of the attributes; need to return
             # a recarray, as described here:
             #   https://docs.scipy.org/doc/numpy/reference/generated/numpy.recarray.html
-            # attributes to generate:
-            #   field_labels - dictionary of names, descriptions
-            #   field_names - just the field names
-            #   field_format - not used
+
+            filename = self.get_default_path(table) + '.txt'
 
             data = ascii.read(filename)
             # astropy seems to treat bytes as str, so can't convert strings back to byte arrays
@@ -436,9 +456,21 @@ class Minbar(IDLDatabase):
             self.field_names = data.colnames
             info = data.info(out=None)
             self.field_labels = dict(zip(self.field_names, info['description']))
+            self.version = 'DR1'
+
+        elif source == 'idl':
+            # Read in the IDL version of the database
+            IDLDatabase.__init__(self, '/'.join((MINBAR_ROOT,table)))
+
+            self.fix_labels()
+            self.version = 'DR1'
+
+        else:
+            logger.error('can''t find source list file to read in table {}, and/or source={} not known'.format(table, source))
+            return
 
         # Keep the flag so we know what kind of data we're using
-        self.IDL = IDL
+        self.source = source
 
         # Generate the list of names
         self.names = self.get_names()
@@ -466,7 +498,7 @@ class Minbar(IDLDatabase):
 
         # set the default attributes for displaying via the show() method
         self.attributes_default = ['entry','name','obsid','instr','sflag']
-        if self.entryname == 'burst':
+        if (self.entryname == 'burst') | (self.entryname == 'event'):
             self.attributes_default += ['time','rexp']
         else:
             self.attributes_default += ['tstart','tstop']
@@ -516,7 +548,7 @@ class Minbar(IDLDatabase):
         """
         names = np.unique(self.records.field('name').data)
 
-        if self.IDL:
+        if self.source == 'idl':
             ra = np.array([self.records.field('ra')[self.records.field('name') == name][0] for name in names])
             ind = np.argsort(ra)
 
@@ -931,8 +963,8 @@ class Minbar(IDLDatabase):
 
 class Bursts(Minbar):
     """
-    Class for extracting and anlysing the MINBAR burst data. The class
-    methods operate on the table read in from the MRT file, which should be
+    Class for extracting and analysing the MINBAR burst data. The class
+    methods operate (by default) on the table read in from the MRT file, which should be
     downloaded as part of the install process.
 
     Example usage:
@@ -957,21 +989,86 @@ class Bursts(Minbar):
     timefield = 'time' # The field used for determining time order
     entryname = 'burst'
 
-    def __init__(self, filename=None, type=1, IDL=False):
+    def __init__(self, source='txt', type=1):
         """
         Create a new Bursts instance.
 
-        :param filename: path to the database files, excluding their extension.  By default the minbar database in the directory of this script is used.
+        :param source: source of the data; one of 'idl', 'txt', 'db' (latter for DR2 and beyond)
         :param type: burst type. The default, 1, selects all vetted Type I bursts. Setting it to None means no type is selected.
         """
 
         # IDLDatabase.__init__(self, filename)
-        Minbar.__init__(self, filename, IDL=IDL)
+        Minbar.__init__(self, source, 'minbar')
 
-        if IDL:
+        if (source == 'idl') | (source == 'db'):
+            # The IDL and database tables include other than thermonuclear (type I) bursts, so force that selection here
             self.type = type
+            self.entryname = 'event'
         else:
             self.type = None
+
+        if source == 'db':
+            # set field_labels for db source
+            # copied initally from the field_labels for the IDL database and augmented with the
+            # column descriptions from Table 11 in the DR1 paper
+            self.field_labels = { 'entry': 'Entry or Record Number',
+                'added': 'Date burst added [dd-mm-yyy]',
+                'instr': 'Instrument label',
+                'obsid': 'Observation ID',
+                'id': 'Entry value for RXTE IDL database (internal use only)',
+                'xref': 'Burst ID in external catalog (G08 or C17)',
+                'entry_obs': 'MINBAR observation ID in which this burst falls',
+                'time': 'Burst start time (MJD UT)',
+                'type': 'Burst type (1=thermonuclear, 2=accretion instability, 3=superburst, 4)',
+                'baryshift': 'Add to time to get the arrival time at SS barycentre',
+                'ra': 'R.A. of origin, where known [decimal hours, J2000]',
+                'dec': 'Dec of origin, where known [decimal degrees, J2000]',
+                'name': 'Likely burst origin',
+                'mult': 'Number of MINBAR instruments which detected this event',
+                'angle': 'Angle between the source position and pointing axis',
+                'vigcorr': 'Vignetting correction factor',
+                'pcount': 'Peak count rate',
+                'pcounte': '1-sigma error on peak count rate',
+                'pflux': 'Peak photon flux',
+                'pfluxe': 'Uncertainty on peak photon flux',
+                'fluen': 'Integrated photon flux',
+                'fluene': 'Uncertainty on integrated photon flux',
+                'bpflux': 'Bolometric peak flux (from blackbody fit)',
+                'bpfluxe': 'Uncertainty on bolometric peak flux',
+                'kt': 'Blackbody temperature kT at burst peak',
+                'kte': 'Uncertainty on blackbody temperature kT at burst peak',
+                'rad': 'Blackbody normalisation at burst peak',
+                'rade': 'Uncertainty on blackbody normalisation at burst peak',
+                'bfluen': 'Bolometric fluence (integrated bolometric flux), E_b',
+                'bfluene': 'Uncertainty on bolometric fluence',
+                'nh': 'Absorption column density for blackbody fit',
+                'nhe': 'Uncertainty on absorption column density',
+                'rexp': 'Photospheric radius-expansion flag',
+                'flag': 'Numeric flag for analysis conditions',
+                'sflag': 'Data quality/analysis flags',
+                'rise': 'Burst rise time',
+                'risee': 'Error on burst rise',
+                'tau': 'Ratio of fluence to peak flux, tau',
+                'taue': 'Uncertainty on tau',
+                'dur': 'Burst duration',
+                'dure': 'Uncertainty on burst duration',
+                'bnum': 'Order of the event within the observation',
+                'edt': 'Decay constant for exponential fit to profile',
+                'edte': 'Error on decay constant',
+                'tdel': 'Time since previous burst from this source',
+                'trec': 'Inferred recurrence time',
+                'perflx': 'Persistent 3-25 keV flux prior to the burst, F_per',
+                'perflxe': 'Uncertainty on persistent flux',
+                'alpha': 'Ratio of integrated persistent flux to burst fluence, alpha',
+                'alphae': 'Uncertainty on alpha',
+                'bc': 'Bolometric correction adopted for persistent flux',
+                'bce': 'Uncertainty on bolometric correction',
+                'gamma': 'Ratio of persistent flux to peak PRE burst flux, gamma',
+                'sc': 'Soft colour',
+                'hc': 'Hard colour',
+                's_z': 'Position on the colour-colour diagram, S_Z',
+                'refs': 'References for this burst',
+                'notes': ''}
 
         # Among other things, this call sets the selection, order, order_field and ind arrays
         self.clear()
@@ -1150,12 +1247,12 @@ class Bursts(Minbar):
     def burstplot(self, entry=None, param='flux', bdata=None, show=True,
         **kwargs):
         """
-	General-purpose routine to plot burst data. Would like to be able
-	to call this in a number of ways, both with a burst ID from
-	MINBAR, but also with a pandas table (as read in with
-	get_burst_data, for example). And do a bunch of different plots,
+        General-purpose routine to plot burst data. Would like to be able
+        to call this in a number of ways, both with a burst ID from
+        MINBAR, but also with a pandas table (as read in with
+        get_burst_data, for example). And do a bunch of different plots,
         including the three-panel "in 't Zand" plot (see
-	e.g. Fig 3, `in 't Zand et al. 2012, A&A 547, A47 <https://ui.adsabs.harvard.edu/abs/2012A%26A...547A..47I>`_), as well as the
+	    e.g. Fig 3, `in 't Zand et al. 2012, A&A 547, A47 <https://ui.adsabs.harvard.edu/abs/2012A%26A...547A..47I>`_), as well as the
         three-panel "HR-diagram" version
 
         TODO add some annotation identifying the burst, somewhere...
@@ -1433,8 +1530,13 @@ class Bursts(Minbar):
         """
         Return a nice string.
         """
-        return "Multi-INstrument Burst ARchive (MINBAR) ({} {}s from {} sources)".format(
-            len(self.records), self.entryname, len(self.names) )
+
+        _add = ''
+        if self.source != 'txt':
+            _add = '\n  Data source: {}'.format(self.source)
+
+        return "Multi-INstrument Burst ARchive (MINBAR) {} ({} {}s from {} sources)".format(
+            self.version, len(self.records), self.entryname, len(self.names)) + _add
 
 
     def has_error(self, field):
@@ -1553,25 +1655,21 @@ class Observations(Minbar):
     entryname = 'observation'
 
 
-    def __init__(self, filename=None, type=None, IDL=False, bursts=True, verbose=True):
+    def __init__(self, source='txt', type=None, bursts=True, verbose=True):
         """
         Load the database of observations.
         """
-        if filename==None:
-            filename = self.get_default_path('minbar-obs')
 
         if verbose:
             logger.info('loading observations, please wait...')
 
-        Minbar.__init__(self, filename, IDL=IDL)
+        Minbar.__init__(self, source, 'minbar-obs')
 
         if bursts:
             # by default also import the bursts
             # I think filename is only used for the IDL option, but try to fix that here
-            bfilename = filename
-            if bfilename is not None:
-                bfilename = bfilename[:-4] # drop the -obs part
-            self.bursts = Bursts(filename=bfilename, IDL=IDL)
+
+            self.bursts = Bursts(source)
         else:
             self.bursts = None
 
@@ -1601,8 +1699,13 @@ class Observations(Minbar):
         """
         Return a nice string.
         """
-        return "Multi-INstrument oBservation ARchive (MINBAR) ({} {}s from {} sources)".format(
-            len(self.records), self.entryname, len(self.names))
+
+        _add = ''
+        if self.source != 'txt':
+            _add = '\n  Data source: {}'.format(self.source)
+
+        return "Multi-INstrument oBservation ARchive (MINBAR) {} ({} {}s from {} sources)".format(
+            self.version, len(self.records), self.entryname, len(self.names)) + _add
 
     def plot(self, bursts=True, entry=None, lightcurve=None, show=True, **kwargs):
         """
