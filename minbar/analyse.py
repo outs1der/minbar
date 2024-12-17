@@ -1024,29 +1024,32 @@ def calc_alpha(src, bc=None, nperbin=16, limit=None, custom=None,
     #   True, then we bin using gammas; if False, we use fluxes
 
     # ----------------------------------------------------------------------------
-    # Find the F_Edd value for the source
-    # I think this bit is redundant since we're only working with one source at at
-    # time
-
+    # Load the source table 
     s = minbar.Sources()
-    fedd = None
-    if s.local_files:
-        if debug:
-            print('{}: extracting Eddington luminosity via get_FEdd'.format(fn))
-        s.name_like(src)
-        test = s['F_Edd']
-        if test > 0.:
-            fedd = test
+    s.name_like(src)
+
+    # Find the F_Edd value for the source
+    # this bit is redundant since we're only working with one source at at
+    # time (and we're working with gamma, when we're normalising)
+
+    # fedd = None
+    # if s.local_files:
+    #     if debug:
+    #         print('{}: extracting Eddington luminosity via get_FEdd'.format(fn))
+    #     test = s['F_Edd']
+    #     if test > 0.:
+    #         fedd = test
 
     # Check that all sources have an F_Edd value, and adjust if not
 
-    if (fedd is None):
-        print("{}: ** WARNING ** no F_Edd value for {}".format(fn, src))
-        # return None
+    # if (fedd is None):
+    #     print("{}: ** WARNING ** no F_Edd value for {}".format(fn, src))
+    #     # return None
 
     # Get the anisotropy factor
 
-    if 'D' in (s['type']):
+    assert len(s['type']) == 1
+    if 'D' in (s['type'].values[0]):
         aniso_fac = minbar.ANISOTROPY['dipper'][1] / minbar.ANISOTROPY['dipper'][0]
     else:
         aniso_fac = minbar.ANISOTROPY['non-dipper'][1] / minbar.ANISOTROPY['non-dipper'][0]
