@@ -7,6 +7,7 @@ import scipy.special
 import os, sys
 import pickle
 import minbar
+import astropy.units as u
 import matplotlib.pyplot as plt
 
 def idlwhere(bool):
@@ -259,6 +260,89 @@ def dt_nonzero(time):
     ma = np.ma.masked_equal(_dt, 0.0, copy=False)
 
     return ma.min()
+
+
+def fit_burst_times(time=None, entry_obs=None, adjust=[], swt_thresh=0.5*u.hr,
+    plot=True, _tunit='hr'):
+    """
+    Routine to generate a trial model to a set of burst times, and fit to
+    get the average recurrence time. Accepts a set of burst times, or a
+    set of MINBAR observation IDs from which the bursts are drawn
+    
+    Adapted from the Analysis of high-state bursts.ipynb notebook
+    
+    :param time: burst times
+    :param entry_obs: MINBAR observation entry numbers, from which the burst times will be extracted
+    :param adjust: list of tuples for adjustments of the default cycle count. E.g. [(3,+1), (5, -2)] will first increment the cycle count for the 3rd and later bursts by 1; and then decrement the 5th and later bursts by 2
+    :param swt_thresh: short waiting time threshold, below which burst separations will be ignored for the pursposes of estimating the recurrence time
+    :param plot: set to False to skip the diagnostic plot
+      
+    :return: array of cycle counts, tuple giving best-fit recurrence time and uncertainty, and rms for fit
+    """
+    
+    if (time is None) & (entry_obs is None):
+        print ('** ERROR ** need to specify burst times or observation IDs')
+        return
+    elif (time is None) & (entry_obs is not None):
+        # when we incorporate this into one of the classes, can replace the below with 
+        # self or self.bursts, respectively
+        import minbar
+        b = minbar.Bursts()
+        b.select(entry_obs,'entry_obs')
+        b.show(['entry','instr','obsid','bfluen','trec','tdel','alpha'])
+        
+        time = b['time']
+        
+    time0 = min(time)
+    unit = time.unit
+    # print (unit, type(unit))
+    tfac = (1.*unit).to(_tunit).value
+        
+    dt = (time[1:]-time[:-1])
+    dt0 = min(dt[dt > swt_thresh.to(unit)])
+
+    # generate the trial cycle count numbers
+    
+    c = np.round(((time-min(time))/dt0).value)
+
+    # adjust the cycle counts, e.g. where there is an obvious phase wrap, because the
+    # initial trial value was too long or too short
+    
+    for delc in adjust:
+        c[delc[0]:] += delc[1]
+        
+    # do the fit; see
+    # https://stackoverflow.com/questions/27283393/linear-regression-slope-error-in-numpy
+
+    coef, cov = np.polyfit(c, time, 1, cov=True)
+    print (coef, time0)
+    tdel, e_tdel = coef[0]*tfac*u.Unit(_tunit), np.sqrt(np.diag(cov)[0])*tfac*u.Unit(_tunit)
+    print ('Average recurrence time = {:.4f}+/-{:.4f}'.format(tdel.value, e_tdel))
+    
+    # poly1d_fn is now a function which takes in x and returns an estimate for y
+
+    poly1d_fn = np.poly1d(coef) 
+    resid = (time-poly1d_fn(c)).to(_tunit)
+
+    if plot:
+
+        # set up a plot showing the fit and the residuals
+        # example here https://matplotlib.org/stable/gallery/text_labels_and_annotations/label_subplots.html#sphx-glr-gallery-text-labels-and-annotations-label-subplots-py
+
+        fig, axs = plt.subplot_mosaic([['a)'], ['a)'], ['b)']],
+                                  layout='constrained')
+
+        axs['a)'].plot(c,time, 'yo', c, poly1d_fn(c), '--k') #'--k'=black dashed line, 'yo' = yellow circle marker
+        axs['a)'].set_ylabel('Burst time (MJD)')
+        axs['b)'].plot(c,resid, 'yo')
+        axs['b)'].axhline(0,0,ls='--',c='k')
+
+        axs['b)'].set_xlabel('Burst number')
+        axs['b)'].set_ylabel('Residual ({})'.format(_tunit))
+
+        plt.show()
+    
+    return c, (tdel, e_tdel), np.sqrt(np.mean(resid**2))
 
 
 def burst_template(x, a):
