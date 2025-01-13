@@ -271,7 +271,7 @@ def fit_burst_times(time=None, entry_obs=None, adjust=[], swt_thresh=0.5*u.hr,
     
     Adapted from the Analysis of high-state bursts.ipynb notebook
     
-    :param time: burst times
+    :param time: burst times. Can be astropy column or an array of times (days assumed)
     :param entry_obs: MINBAR observation entry numbers, from which the burst times will be extracted
     :param adjust: list of tuples for adjustments of the default cycle count. E.g. [(3,+1), (5, -2)] will first increment the cycle count for the 3rd and later bursts by 1; and then decrement the 5th and later bursts by 2
     :param swt_thresh: short waiting time threshold, below which burst separations will be ignored for the pursposes of estimating the recurrence time
@@ -281,12 +281,11 @@ def fit_burst_times(time=None, entry_obs=None, adjust=[], swt_thresh=0.5*u.hr,
     """
     
     if (time is None) & (entry_obs is None):
-        print ('** ERROR ** need to specify burst times or observation IDs')
+        minbar.logger.error('need to specify burst times or observation IDs')
         return
     elif (time is None) & (entry_obs is not None):
         # when we incorporate this into one of the classes, can replace the below with 
         # self or self.bursts, respectively
-        import minbar
         b = minbar.Bursts()
         b.select(entry_obs,'entry_obs')
         b.show(['entry','instr','obsid','bfluen','trec','tdel','alpha'])
@@ -294,7 +293,13 @@ def fit_burst_times(time=None, entry_obs=None, adjust=[], swt_thresh=0.5*u.hr,
         time = b['time']
         
     time0 = min(time)
-    unit = time.unit
+    try:
+        unit = time.unit
+    except:
+        minbar.logger.warning("time has no units, assuming days")
+        unit = u.d
+        time *= unit
+
     # print (unit, type(unit))
     tfac = (1.*unit).to(_tunit).value
         
@@ -315,14 +320,14 @@ def fit_burst_times(time=None, entry_obs=None, adjust=[], swt_thresh=0.5*u.hr,
     # https://stackoverflow.com/questions/27283393/linear-regression-slope-error-in-numpy
 
     coef, cov = np.polyfit(c, time, 1, cov=True)
-    print (coef, time0)
+    # print (coef, time0)
     tdel, e_tdel = coef[0]*tfac*u.Unit(_tunit), np.sqrt(np.diag(cov)[0])*tfac*u.Unit(_tunit)
-    print ('Average recurrence time = {:.4f}+/-{:.4f}'.format(tdel.value, e_tdel))
+    minbar.logger.info ('average recurrence time = {:.4f}+/-{:.4f}'.format(tdel.value, e_tdel))
     
     # poly1d_fn is now a function which takes in x and returns an estimate for y
 
     poly1d_fn = np.poly1d(coef) 
-    resid = (time-poly1d_fn(c)).to(_tunit)
+    resid = (time-poly1d_fn(c)*unit).to(_tunit)
 
     if plot:
 
