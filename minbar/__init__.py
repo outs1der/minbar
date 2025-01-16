@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.24.3'
+__version__ = '1.24.4'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -2038,10 +2038,17 @@ class Observation:
             # Using astropy to keep track of the time scale and units, read from the
             # header file; see https://docs.astropy.org/en/stable/time
 
+            breakpoint()
             timesys = header['TIMESYS']
             timeunit = header['TIMEUNIT']
             timepixr = header['TIMEPIXR']
-            timezero = header['TIMEZERO']*u.Unit(timeunit)
+            if 'TIMEZERO' in header:
+                timezero = header['TIMEZERO']*u.Unit(timeunit)
+            elif (('TIMEZERI' in header) & ('TIMEZERF' in header)):
+                timezero = (header['TIMEZERI']+header['TIMEZERF'])*u.Unit(timeunit)
+            else:
+                logger.warning('no TIMEZERO/TIMEZERI/TIMEZERF keywords found, setting to zero')
+                timezero = 0.0*u.Unit(timeunit)
             time = lc['TIME']*u.Unit(timeunit)
 
             rate = lc['RATE']/u.s/effarea
@@ -2463,7 +2470,7 @@ class Sources:
         if all or self.selection is None:
             return data
         else:
-            return data[self.selection]
+            return data
 
 
     def __getitem__(self, field):
@@ -2743,7 +2750,7 @@ class Instrument:
 
         if source_name is None:
             self.source = Sources()
-            self.source_name = self.source['name']
+            self.source_name = self.source['name'].values
         else:
             self.source_name = source_name
 
@@ -2752,7 +2759,7 @@ class Instrument:
         # (without some judicious softlinks)
 
         # print (type(self.source_name), type(self.source_name[0]), self.source_name[0])
-        self.source_path = np.char.replace(self.source_name, " ", "")
+        self.source_path = np.char.replace(self.source_name.astype(str), " ", "")
         if self.label == 'XP':
             # for RXTE/PCA, most sources just omit the prefix (but not the GX sources)
             # self.source_path = np.array([x.split()[1] for x in self.source_name])
