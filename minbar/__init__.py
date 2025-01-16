@@ -1764,7 +1764,7 @@ class Observation:
             # print (label)
 
             # Don't set these parameters yet, as they'll be defined outside this block
-            instr = Instrument(label, obs_entry['instr'][2:])# , obs_entry['instr'])
+            instr = Instrument(label, camera=obs_entry['instr'][2:])# , obs_entry['instr'])
             name = obs_entry['name']
             obsid = obs_entry['obsid']
 
