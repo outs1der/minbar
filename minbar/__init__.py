@@ -2141,7 +2141,6 @@ class Observation:
             # Using astropy to keep track of the time scale and units, read from the
             # header file; see https://docs.astropy.org/en/stable/time
 
-            breakpoint()
             timesys = header['TIMESYS']
             timeunit = header['TIMEUNIT']
             timepixr = header['TIMEPIXR']
