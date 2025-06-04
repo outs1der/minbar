@@ -244,6 +244,12 @@ def verify_sources(con):
     else:
         minbar.logger.info("all sources present and accounted for")
 
+    # Check for dupes here
+
+    check = set(m[~missing])
+    if len(check) < len(m[~missing]):
+        minbar.logger.error("duplicate name matches against Jean's list")
+
     # Should also check the completeness of the transient flags, and the
     # orbital periods
     # this is only done for the sources in Jean's list that are not
