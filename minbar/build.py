@@ -57,7 +57,9 @@ def scrape_jeanslist():
     :return: pandas table with all data
     """
 
-    url = 'http://www.sron.nl/~jeanz/bursterlist.html'
+    # URL updated 2025 Jun 4
+    # url = 'http://www.sron.nl/~jeanz/bursterlist.html'
+    url = 'https://www.sronpersonalpages.nl/~jeanz/bursterlist.html'
     req = requests.get(url)
 
     if req.status_code != 200:
@@ -233,36 +235,42 @@ def verify_sources(con):
         # print(_name, m[-1])
     # s.columns
 
-    missing = np.array(m) == None
+    m = np.array(m)
+    missing = m == None
     if len(np.where(missing)[0]) > 0:
-        minbar.logger.info('{} sources missing from my list:'.format(len(np.where(missing)[0])))
-        print(np.array(name)[missing])
+        minbar.logger.info('{} source(s) missing from my list:'.format(len(np.where(missing)[0])))
+        # print(np.array(name)[missing])
+        print(jeans_table['name'][missing])
     else:
         minbar.logger.info("all sources present and accounted for")
 
-    # Should also check the completeness of the transient flags, and the orbital periods
+    # Should also check the completeness of the transient flags, and the
+    # orbital periods
+    # this is only done for the sources in Jean's list that are not
+    # missing (and vice versa); careful with the indexing! (both objects
+    # are pandas tables)
 
-    print('Got {} possible transients, and {} sources with orbital periods'.format(
-        len(np.where(np.array(jeans_table['transient']) != '')[0]),
-        len(np.where(np.array(jeans_table['Porb']) != '')[0])))
+    minbar.logger.info('Got {} possible transients, and {} sources with orbital periods'.format(
+        len(np.where(np.array(jeans_table['transient'][~missing]) != '')[0]),
+        len(np.where(np.array(jeans_table['Porb'][~missing]) != '')[0])))
 
-    mismatch = np.where((np.array(jeans_table['transient']) != '') &
-                        (~np.array(['T' in x for x in s['Type'][m].values])))[0]
+    mismatch = np.where((np.array(jeans_table['transient'][~missing]) != '')&
+                        (~np.array(['T' in x for x in s['Type'].iloc[m[~missing]].values])))[0]
     if len(mismatch) > 0:
         print('\n{:<50} {:<7} {:<7}'.format('Source', 'Jean', 'Type'))
     for i in mismatch:
-        print('{:<50} {:<7} {:<7}'.format(s['NAME'][m[i]]+' = '+jeans_table['name'][i], jeans_table['transient'][i], s['Type'][m[i]]))
+        print('{:<50} {:<7} {:<7}'.format(s['NAME'].iloc[m[~missing][i]]+' = '+jeans_table['name'][~missing].iloc[i], jeans_table['transient'][~missing].iloc[i], s['Type'].iloc[m[~missing][i]]))
 
     print('\n{:<50} {:<7} {:<7}'.format('Source', 'Jean', 'Porb'))
 
-    for i in np.where((np.array(jeans_table['Porb']) != ''))[0]:
+    for i in np.where((np.array(jeans_table['Porb'][~missing]) != ''))[0]:
         discrepant = True
         try:
-            discrepant = np.abs(float(jeans_table['Porb'][i]) - s['Porb'][m[i]]) / s['Porb'][m[i]] > 0.05
+            discrepant = np.abs(float(jeans_table['Porb'][~missing].iloc[i]) - s['Porb'].iloc[m[~missing][i]]) / s['Porb'].iloc[m[~missing][i]] > 0.05
         except:
             pass
         if discrepant:
-            print('{:<50} {:<7} {:<7}'.format(s['NAME'][m[i]]+' = '+jeans_table['name'][i], jeans_table['Porb'][i], s['Porb'][m[i]]))
+            print('{:<50} {:<7} {:<7}'.format(s['NAME'].iloc[m[~missing][i]]+' = '+jeans_table['name'][~missing].iloc[i], jeans_table['Porb'][~missing].iloc[i], s['Porb'].iloc[m[~missing][i]]))
 
     return new
 
