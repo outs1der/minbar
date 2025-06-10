@@ -57,7 +57,9 @@ def scrape_jeanslist():
     :return: pandas table with all data
     """
 
-    url = 'http://www.sron.nl/~jeanz/bursterlist.html'
+    # URL updated 2025 Jun 4
+    # url = 'http://www.sron.nl/~jeanz/bursterlist.html'
+    url = 'https://www.sronpersonalpages.nl/~jeanz/bursterlist.html'
     req = requests.get(url)
 
     if req.status_code != 200:
@@ -157,6 +159,7 @@ def match_name(name, name2, name3=None, comments=None):
 
     return None
 
+
 def write_wiki_csv(outfile='minbar_sources_new.csv', con=None):
     """
     This routine converts the source table into a form for use on the wiki, at
@@ -204,6 +207,7 @@ def write_wiki_csv(outfile='minbar_sources_new.csv', con=None):
     if new_connection:
         con.close()
 
+
 def verify_sources(con):
     """
     Check the source list and see if there are any updates required
@@ -231,38 +235,105 @@ def verify_sources(con):
         # print(_name, m[-1])
     # s.columns
 
-    missing = np.array(m) == None
+    m = np.array(m)
+    missing = m == None
     if len(np.where(missing)[0]) > 0:
-        minbar.logger.info('{} sources missing from my list:'.format(len(np.where(missing)[0])))
-        print(np.array(name)[missing])
+        minbar.logger.info('{} source(s) missing from my list:'.format(len(np.where(missing)[0])))
+        # print(np.array(name)[missing])
+        print(jeans_table['name'][missing])
     else:
         minbar.logger.info("all sources present and accounted for")
 
-    # Should also check the completeness of the transient flags, and the orbital periods
+    # Check for dupes here
 
-    print('Got {} possible transients, and {} sources with orbital periods'.format(
-        len(np.where(np.array(jeans_table['transient']) != '')[0]),
-        len(np.where(np.array(jeans_table['Porb']) != '')[0])))
+    check = set(m[~missing])
+    if len(check) < len(m[~missing]):
+        minbar.logger.error("duplicate name matches against Jean's list")
 
-    mismatch = np.where((np.array(jeans_table['transient']) != '') &
-                        (~np.array(['T' in x for x in s['Type'][m].values])))[0]
+    # Should also check the completeness of the transient flags, and the
+    # orbital periods
+    # this is only done for the sources in Jean's list that are not
+    # missing (and vice versa); careful with the indexing! (both objects
+    # are pandas tables)
+
+    minbar.logger.info('Got {} possible transients, and {} sources with orbital periods'.format(
+        len(np.where(np.array(jeans_table['transient'][~missing]) != '')[0]),
+        len(np.where(np.array(jeans_table['Porb'][~missing]) != '')[0])))
+
+    mismatch = np.where((np.array(jeans_table['transient'][~missing]) != '')&
+                        (~np.array(['T' in x for x in s['Type'].iloc[m[~missing]].values])))[0]
     if len(mismatch) > 0:
         print('\n{:<50} {:<7} {:<7}'.format('Source', 'Jean', 'Type'))
     for i in mismatch:
-        print('{:<50} {:<7} {:<7}'.format(s['NAME'][m[i]]+' = '+jeans_table['name'][i], jeans_table['transient'][i], s['Type'][m[i]]))
+        print('{:<50} {:<7} {:<7}'.format(s['NAME'].iloc[m[~missing][i]]+' = '+jeans_table['name'][~missing].iloc[i], jeans_table['transient'][~missing].iloc[i], s['Type'].iloc[m[~missing][i]]))
 
     print('\n{:<50} {:<7} {:<7}'.format('Source', 'Jean', 'Porb'))
 
-    for i in np.where((np.array(jeans_table['Porb']) != ''))[0]:
+    for i in np.where((np.array(jeans_table['Porb'][~missing]) != ''))[0]:
         discrepant = True
         try:
-            discrepant = np.abs(float(jeans_table['Porb'][i]) - s['Porb'][m[i]]) / s['Porb'][m[i]] > 0.05
+            discrepant = np.abs(float(jeans_table['Porb'][~missing].iloc[i]) - s['Porb'].iloc[m[~missing][i]]) / s['Porb'].iloc[m[~missing][i]] > 0.05
         except:
             pass
         if discrepant:
-            print('{:<50} {:<7} {:<7}'.format(s['NAME'][m[i]]+' = '+jeans_table['name'][i], jeans_table['Porb'][i], s['Porb'][m[i]]))
+            print('{:<50} {:<7} {:<7}'.format(s['NAME'].iloc[m[~missing][i]]+' = '+jeans_table['name'][~missing].iloc[i], jeans_table['Porb'][~missing].iloc[i], s['Porb'].iloc[m[~missing][i]]))
 
     return new
+
+
+def update_ref(ref, minbar_id, ref_id=None, execute=True, commit=False):
+    """
+    This routine is to update the burst reference table with new entries
+
+    :param con: connection to the database
+    :param ref: bibliographic string, e.g. alizai23 (last name & 2-digit year, as listed in all.bib)
+    :param minbar_id: list of MINBAR IDs to which the bursts correspond
+    :param ref_id: array of IDs as in the reference; could be strings or letters, or nothing
+    :param execute: set to True to actually execute the INSERT command; False for testing
+    :param commit: set to True to commit
+
+    :return: the connection object IF commit is False, so that you can review and commit later if need be
+    """
+
+    if ref_id is None:
+        ref_id = np.full(len(minbar_id), '')
+    if len(ref_id) != len(minbar_id):
+        minbar.logger.error('ref_id needs to be same length as minbar_id (use blanks if missing)')
+        return
+
+    assert all(isinstance(x, (int, np.int64)) for x in minbar_id)
+    assert (type(ref) == str) & (np.shape(ref) == ())
+
+    # check for existing entries
+    con = connect_db()
+    existing = pd.read_sql_query("SELECT * from burst_ref WHERE ref_code='{}'".format(ref), con)
+    if len(existing) > 0:
+        for ex_entry in existing['entry_minbar']:
+            if ex_entry in minbar_id:
+                minbar.logger.error('ref {} for entry {} already present, #{}'.format(ref, ex_entry,
+                        existing[existing['entry_minbar'] == ex_entry]['entry'].values[0]))
+                return
+
+    # maybe I don't have to generate the index here
+    cur = con.cursor()
+    cur.execute('PRAGMA foreign_keys = ON')  # always do this!
+    # _command = "INSERT INTO burst_ref (ref_code, entry_minbar, ref_id, entry) VALUES (?, ?, ?, ?)"
+    _command = "INSERT INTO burst_ref (ref_code, entry_minbar, ref_id) VALUES (?, ?, ?)"
+    if not execute:
+        print('Dry run:')
+    for i, entry in enumerate(minbar_id):
+        if execute:
+            cur.execute(_command, (ref, entry, ref_id[i]))#, ind[i]))
+        else:
+            print (_command, (ref, entry, ref_id[i]))#, ind[i]))
+
+    if commit == False:
+        minbar.logger.info('changes not committed!')
+        return con
+    else:
+        con.commit()
+        con.close()
+
 
 # This group of functions are intended to work on observations and candidate events from
 # any instrument; need to pass only enough information e.g. lightcurve path(s), candidate
@@ -296,10 +367,11 @@ def get_new(instr, ignore_unmatched=False, sources=None):
                 print("** ERROR ** {} not present in source name list".format(source))
                 return None
 
+    # Load in the existing observations, so we can skip the ones already ingested
     # Need to fix this hard-wired path prior to deployment, or allow the option to use
     # the text file instead
 
-    obs_db = minbar.Observations('../minbar-obs')
+    obs_db = minbar.Observations() # '../minbar-obs')
 
     to_add = {}
     for source in sources:
@@ -316,8 +388,13 @@ def get_new(instr, ignore_unmatched=False, sources=None):
 
             # Check if the observation is already present
 
-            observations = os.scandir(instr.path + '/data/' + instr.source_path[i])
+            # observations = os.scandir(instr.path + '/data/' + instr.source_path[i])
+            observations = os.scandir('/'.join([minbar.MINBAR_ROOT, instr.path, 'data', instr.source_path[i]]))
             # in_dir = set([str.encode(x.name) for x in observations])
+
+            # need to filter here potentially for matching observation directories, and omit
+            # other stuff (e.g. .DS_Store!)
+
             in_dir = set([x.name for x in observations])
 
             new = in_dir.difference(in_db)

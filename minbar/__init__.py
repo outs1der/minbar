@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.24.4'
+__version__ = '1.29.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -35,6 +35,7 @@ import os, re
 from astropy.io import fits, ascii
 import astropy.units as u
 from astropy.time import Time
+from astropy.table import Table
 from datetime import datetime
 import logging
 import sys
@@ -393,9 +394,12 @@ You should check your source to directory name mapping""".format(nonmatched, nmi
 class Minbar(IDLDatabase):
     """
     This class is provided to access MINBAR burst or observation data
-    EITHER from the MRT tables (publicly available) or from the original
-    IDL database files.  Methods here are common to both
+    EITHER from the original IDL database files, the (publicly available)
+    MRT tables or from the (DR2 and beyond) SQLite3 databases.
+    Methods here are common to both
     :class:`minbar.Bursts` and :class:`minbar.Observations` classes
+
+    TODO: for DR2 and beyond, no need to base this on the IDLDatabase class
 
     Visibility is controlled by the ``selection`` attribute, which indicates
     which of the table entries are selected for display or data extraction
@@ -404,29 +408,45 @@ class Minbar(IDLDatabase):
     default time ordering
     """
 
-    def __init__(self, filename=None, IDL=False):
+    def __init__(self, source='txt', table=None):
+        """
+        Initialise a Minbar class (Bursts or Observations).
+        Default is to use the text files, released with DR1
 
-        if filename==None:
+        :param table: specifies whether you're generating a Bursts ('minbar') or Observations ('minbar-obs') object
+        :param source: one of 'txt', 'idl', 'db'
+        """
+
+        if table==None:
             # If no filename specified, then choose the bursts
-            filename = self.get_default_path('minbar')
+            table = 'minbar'
 
-        if not IDL:
-            filename += '.txt'
+        # common attributes to generate:
+        #   records - actual data for the table
+        #   field_labels - dictionary of names, descriptions
+        #   field_names - just the field names
+        #   field_format - not used
+        if (source == 'db') & (os.path.exists('/'.join((MINBAR_DR2, 'minbar.db')))):
+            # Read in the database version, for DR2 and beyond
+            # Observations db is minbar_obs, not minbar-obs
+            table = '_'.join(table.split('-'))
 
-        if IDL:
-            # Read in the IDL version of the database
-            IDLDatabase.__init__(self, filename)
+            self.con = connect_db()
+            table = pd.read_sql_query('SELECT * FROM {}'.format(table), self.con).applymap(lambda x: x.strip() if isinstance(x, str) else x)
+            self.records = Table.from_pandas(table)
+            self.con.close()
+            self.header = None
+            self.field_names = list(self.records.columns)
+            self.version = 'DR1+'
 
-            self.fix_labels()
+            # field_labels is not set here, so we do that in the child class (Bursts/Observations)
 
-        else:
+        elif source == 'txt':
             # read in the MRT version, and fake the rest of the attributes; need to return
             # a recarray, as described here:
             #   https://docs.scipy.org/doc/numpy/reference/generated/numpy.recarray.html
-            # attributes to generate:
-            #   field_labels - dictionary of names, descriptions
-            #   field_names - just the field names
-            #   field_format - not used
+
+            filename = self.get_default_path(table) + '.txt'
 
             data = ascii.read(filename)
             # astropy seems to treat bytes as str, so can't convert strings back to byte arrays
@@ -436,9 +456,21 @@ class Minbar(IDLDatabase):
             self.field_names = data.colnames
             info = data.info(out=None)
             self.field_labels = dict(zip(self.field_names, info['description']))
+            self.version = 'DR1'
+
+        elif source == 'idl':
+            # Read in the IDL version of the database
+            IDLDatabase.__init__(self, '/'.join((MINBAR_ROOT,table)))
+
+            self.fix_labels()
+            self.version = 'DR1'
+
+        else:
+            logger.error('can''t find source list file to read in table {}, and/or source={} not known'.format(table, source))
+            return
 
         # Keep the flag so we know what kind of data we're using
-        self.IDL = IDL
+        self.source = source
 
         # Generate the list of names
         self.names = self.get_names()
@@ -466,7 +498,7 @@ class Minbar(IDLDatabase):
 
         # set the default attributes for displaying via the show() method
         self.attributes_default = ['entry','name','obsid','instr','sflag']
-        if self.entryname == 'burst':
+        if (self.entryname == 'burst') | (self.entryname == 'event'):
             self.attributes_default += ['time','rexp']
         else:
             self.attributes_default += ['tstart','tstop']
@@ -516,7 +548,7 @@ class Minbar(IDLDatabase):
         """
         names = np.unique(self.records.field('name').data)
 
-        if self.IDL:
+        if self.source == 'idl':
             ra = np.array([self.records.field('ra')[self.records.field('name') == name][0] for name in names])
             ind = np.argsort(ra)
 
@@ -931,8 +963,8 @@ class Minbar(IDLDatabase):
 
 class Bursts(Minbar):
     """
-    Class for extracting and anlysing the MINBAR burst data. The class
-    methods operate on the table read in from the MRT file, which should be
+    Class for extracting and analysing the MINBAR burst data. The class
+    methods operate (by default) on the table read in from the MRT file, which should be
     downloaded as part of the install process.
 
     Example usage:
@@ -957,21 +989,86 @@ class Bursts(Minbar):
     timefield = 'time' # The field used for determining time order
     entryname = 'burst'
 
-    def __init__(self, filename=None, type=1, IDL=False):
+    def __init__(self, source='txt', type=1):
         """
         Create a new Bursts instance.
 
-        :param filename: path to the database files, excluding their extension.  By default the minbar database in the directory of this script is used.
+        :param source: source of the data; one of 'idl', 'txt', 'db' (latter for DR2 and beyond)
         :param type: burst type. The default, 1, selects all vetted Type I bursts. Setting it to None means no type is selected.
         """
 
         # IDLDatabase.__init__(self, filename)
-        Minbar.__init__(self, filename, IDL=IDL)
+        Minbar.__init__(self, source, 'minbar')
 
-        if IDL:
+        if (source == 'idl') | (source == 'db'):
+            # The IDL and database tables include other than thermonuclear (type I) bursts, so force that selection here
             self.type = type
+            self.entryname = 'event'
         else:
             self.type = None
+
+        if source == 'db':
+            # set field_labels for db source
+            # copied initally from the field_labels for the IDL database and augmented with the
+            # column descriptions from Table 11 in the DR1 paper
+            self.field_labels = { 'entry': 'Entry or Record Number',
+                'added': 'Date burst added [dd-mm-yyy]',
+                'instr': 'Instrument label',
+                'obsid': 'Observation ID',
+                'id': 'Entry value for RXTE IDL database (internal use only)',
+                'xref': 'Burst ID in external catalog (G08 or C17)',
+                'entry_obs': 'MINBAR observation ID in which this burst falls',
+                'time': 'Burst start time (MJD UT)',
+                'type': 'Burst type (1=thermonuclear, 2=accretion instability, 3=superburst, 4)',
+                'baryshift': 'Add to time to get the arrival time at SS barycentre',
+                'ra': 'R.A. of origin, where known [decimal hours, J2000]',
+                'dec': 'Dec of origin, where known [decimal degrees, J2000]',
+                'name': 'Likely burst origin',
+                'mult': 'Number of MINBAR instruments which detected this event',
+                'angle': 'Angle between the source position and pointing axis',
+                'vigcorr': 'Vignetting correction factor',
+                'pcount': 'Peak count rate',
+                'pcounte': '1-sigma error on peak count rate',
+                'pflux': 'Peak photon flux',
+                'pfluxe': 'Uncertainty on peak photon flux',
+                'fluen': 'Integrated photon flux',
+                'fluene': 'Uncertainty on integrated photon flux',
+                'bpflux': 'Bolometric peak flux (from blackbody fit)',
+                'bpfluxe': 'Uncertainty on bolometric peak flux',
+                'kt': 'Blackbody temperature kT at burst peak',
+                'kte': 'Uncertainty on blackbody temperature kT at burst peak',
+                'rad': 'Blackbody normalisation at burst peak',
+                'rade': 'Uncertainty on blackbody normalisation at burst peak',
+                'bfluen': 'Bolometric fluence (integrated bolometric flux), E_b',
+                'bfluene': 'Uncertainty on bolometric fluence',
+                'nh': 'Absorption column density for blackbody fit',
+                'nhe': 'Uncertainty on absorption column density',
+                'rexp': 'Photospheric radius-expansion flag',
+                'flag': 'Numeric flag for analysis conditions',
+                'sflag': 'Data quality/analysis flags',
+                'rise': 'Burst rise time',
+                'risee': 'Error on burst rise',
+                'tau': 'Ratio of fluence to peak flux, tau',
+                'taue': 'Uncertainty on tau',
+                'dur': 'Burst duration',
+                'dure': 'Uncertainty on burst duration',
+                'bnum': 'Order of the event within the observation',
+                'edt': 'Decay constant for exponential fit to profile',
+                'edte': 'Error on decay constant',
+                'tdel': 'Time since previous burst from this source',
+                'trec': 'Inferred recurrence time',
+                'perflx': 'Persistent 3-25 keV flux prior to the burst, F_per',
+                'perflxe': 'Uncertainty on persistent flux',
+                'alpha': 'Ratio of integrated persistent flux to burst fluence, alpha',
+                'alphae': 'Uncertainty on alpha',
+                'bc': 'Bolometric correction adopted for persistent flux',
+                'bce': 'Uncertainty on bolometric correction',
+                'gamma': 'Ratio of persistent flux to peak PRE burst flux, gamma',
+                'sc': 'Soft colour',
+                'hc': 'Hard colour',
+                's_z': 'Position on the colour-colour diagram, S_Z',
+                'refs': 'References for this burst',
+                'notes': ''}
 
         # Among other things, this call sets the selection, order, order_field and ind arrays
         self.clear()
@@ -1150,12 +1247,12 @@ class Bursts(Minbar):
     def burstplot(self, entry=None, param='flux', bdata=None, show=True,
         **kwargs):
         """
-	General-purpose routine to plot burst data. Would like to be able
-	to call this in a number of ways, both with a burst ID from
-	MINBAR, but also with a pandas table (as read in with
-	get_burst_data, for example). And do a bunch of different plots,
+        General-purpose routine to plot burst data. Would like to be able
+        to call this in a number of ways, both with a burst ID from
+        MINBAR, but also with a pandas table (as read in with
+        get_burst_data, for example). And do a bunch of different plots,
         including the three-panel "in 't Zand" plot (see
-	e.g. Fig 3, `in 't Zand et al. 2012, A&A 547, A47 <https://ui.adsabs.harvard.edu/abs/2012A%26A...547A..47I>`_), as well as the
+	    e.g. Fig 3, `in 't Zand et al. 2012, A&A 547, A47 <https://ui.adsabs.harvard.edu/abs/2012A%26A...547A..47I>`_), as well as the
         three-panel "HR-diagram" version
 
         TODO add some annotation identifying the burst, somewhere...
@@ -1433,8 +1530,13 @@ class Bursts(Minbar):
         """
         Return a nice string.
         """
-        return "Multi-INstrument Burst ARchive (MINBAR) ({} {}s from {} sources)".format(
-            len(self.records), self.entryname, len(self.names) )
+
+        _add = ''
+        if self.source != 'txt':
+            _add = '\n  Data source: {}'.format(self.source)
+
+        return "Multi-INstrument Burst ARchive (MINBAR) {} ({} {}s from {} sources)".format(
+            self.version, len(self.records), self.entryname, len(self.names)) + _add
 
 
     def has_error(self, field):
@@ -1553,25 +1655,21 @@ class Observations(Minbar):
     entryname = 'observation'
 
 
-    def __init__(self, filename=None, type=None, IDL=False, bursts=True, verbose=True):
+    def __init__(self, source='txt', type=None, bursts=True, verbose=True):
         """
         Load the database of observations.
         """
-        if filename==None:
-            filename = self.get_default_path('minbar-obs')
 
         if verbose:
             logger.info('loading observations, please wait...')
 
-        Minbar.__init__(self, filename, IDL=IDL)
+        Minbar.__init__(self, source, 'minbar-obs')
 
         if bursts:
             # by default also import the bursts
             # I think filename is only used for the IDL option, but try to fix that here
-            bfilename = filename
-            if bfilename is not None:
-                bfilename = bfilename[:-4] # drop the -obs part
-            self.bursts = Bursts(filename=bfilename, IDL=IDL)
+
+            self.bursts = Bursts(source)
         else:
             self.bursts = None
 
@@ -1601,8 +1699,13 @@ class Observations(Minbar):
         """
         Return a nice string.
         """
-        return "Multi-INstrument oBservation ARchive (MINBAR) ({} {}s from {} sources)".format(
-            len(self.records), self.entryname, len(self.names))
+
+        _add = ''
+        if self.source != 'txt':
+            _add = '\n  Data source: {}'.format(self.source)
+
+        return "Multi-INstrument oBservation ARchive (MINBAR) {} ({} {}s from {} sources)".format(
+            self.version, len(self.records), self.entryname, len(self.names)) + _add
 
     def plot(self, bursts=True, entry=None, lightcurve=None, show=True, **kwargs):
         """
@@ -1764,7 +1867,7 @@ class Observation:
             # print (label)
 
             # Don't set these parameters yet, as they'll be defined outside this block
-            instr = Instrument(label, obs_entry['instr'][2:])# , obs_entry['instr'])
+            instr = Instrument(label, camera=obs_entry['instr'][2:])# , obs_entry['instr'])
             name = obs_entry['name']
             obsid = obs_entry['obsid']
 
@@ -1871,7 +1974,7 @@ class Observation:
 
 
     def plot(self, figure=None, show=True, show_bursts=True, sym_burst='^r',
-            **kwargs):
+            title=True, **kwargs):
         """
         Plot the observation lightcurve, reading it in first if need be.
         Keyword arguments are passed on to the plot command.
@@ -1888,9 +1991,19 @@ class Observation:
           to be plotted on the same axis (for example)
         :param show: display the figure immediately or not (latter case for
           multiple observations to be plotted together)
+	:param show_bursts: set to True (default) to show any bursts
+          present in the observation
+        :param sym_bursts: symbol used for bursts
+	:param title: set to None to omit the title, or a string for any
+	  specific title, or True for a standard informative title giving
+          source, instrument and observation ID
+
         :return: plot object
         """
+
         ylabel = 'Rate (count s$^{-1}$ cm$^{-2}$)'
+        # def_style = { 'fmt': '.' }
+        def_style = { 'color': 'C0' }
 
         if self.time is None:
             self.get_lc()
@@ -1909,18 +2022,33 @@ class Observation:
             tscale = ''
 
         else:
+            # this is the "normal" lightcurve plot, with bins and errors
             # plt.plot(lc['TIME'],lc['RATE'])
             # plot can't work with "raw" time units
             # the duplication of .mjd is not a typo below! Also the scale method
             # is for Time objects, which mjd should be defined as
-            plt.plot(self.mjd.mjd, self.rate, **kwargs)
+
+            for key in def_style.keys():
+                if key not in kwargs.keys():
+                    kwargs[key] = def_style[key]
+            # plt.plot(self.mjd.mjd, self.rate, **kwargs)
+            if 'fmt' not in kwargs.keys():
+                plt.step(self.mjd.mjd, self.rate, where='mid', **kwargs)
+                plt.errorbar(self.mjd.mjd, self.rate, yerr=self.error, fmt='none', **kwargs)
+            else:
+                plt.errorbar(self.mjd.mjd, self.rate, yerr=self.error, **kwargs)
 
             rate_max = np.nanmax(self.rate)
             rate_range = rate_max-np.nanmin(self.rate)
             tscale = self.mjd.scale.upper()
 
         plt.xlabel('Time (MJD '+tscale+')')
-        # plt.ylabel(ylabel)
+        plt.ylabel(ylabel)
+        if title is not None:
+            if type(title) == str:
+                plt.title(title)
+            else:
+                plt.title("{} {{\\it {}}} obs \#{}".format(self.name, self.instr.name, self.obsid))
 
         if hasattr(self, 'bursts') & show_bursts:
             # also plot the bursts
@@ -2038,9 +2166,8 @@ class Observation:
             # Using astropy to keep track of the time scale and units, read from the
             # header file; see https://docs.astropy.org/en/stable/time
 
-            breakpoint()
             timesys = header['TIMESYS']
-            timeunit = header['TIMEUNIT']
+            timeunit = header['TIMEUNIT'].lower()
             timepixr = header['TIMEPIXR']
             if 'TIMEZERO' in header:
                 timezero = header['TIMEZERO']*u.Unit(timeunit)
@@ -2220,12 +2347,12 @@ class Observation:
 class Sources:
     """
     Contains all information on the sources present in MINBAR, via
-    the file minbar_sources.fits.
+    the file minbar_sources.fits (DR1) or the database (DR2 and beyond)
 
     Example:
 
     | s = Sources()
-    | print s.field_names # Show available data fields
+    | print (s.field_names) # Show available data fields
     | ra = s['ra_obj'] # Right ascension for all sources
     | s.name_like('1636')
     | ra = s['ra_obj'] # Right ascension for selected source only
@@ -2248,9 +2375,9 @@ class Sources:
             filename = self.get_default_path()
         if (source == 'db') & (os.path.exists('/'.join((MINBAR_DR2,'minbar.db')))):
             # here we can load in the data from the database
-            con = connect_db()
-            self.table = pd.read_sql_query('SELECT * FROM sources', con).applymap(lambda x: x.strip() if isinstance(x, str) else x)
-            con.close()
+            self.con = connect_db()
+            self.table = pd.read_sql_query('SELECT * FROM sources', self.con).applymap(lambda x: x.strip() if isinstance(x, str) else x)
+            self.con.close()
             self.header = None
             self.field_names = {i.lower(): i for i in self.table.columns}
             self.version = '3.0+'
@@ -2319,6 +2446,7 @@ class Sources:
             logger.error('can''t find source list file to read in source table, and/or source={} not known'.format(source))
             return
 
+        self.source = source
         self.table.sort_values('RA_OBJ', inplace=True)
         self.clear()
 
@@ -2374,6 +2502,7 @@ class Sources:
         # set default attributes for show (same as for Table 1 in the DR1 paper)
 
         self.attributes_default = ['name','disc','type','ra_obj','dec_obj','err_rad','porb','nh','exp','nburst','rate']
+
 
     def show(self, attributes=None, all=False):
         """
@@ -2638,6 +2767,90 @@ class Sources:
 
         return dist, diste_hi, diste_lo, dist_method
 
+
+    def db_update(self, entry, values, execute=True, commit=False):
+        """
+        Function to update the source database
+        TODO: this could probably be set up as a more generic routine, and used for all the databases
+
+        :param entry: identifying information for the entry; can be a string (source name), or identifying dictionary (column plus value)
+        :param values: values to update; dict of column, values
+        :param execute: set to True to actually execute the UPDATE command; False for testing
+        :param commit: set to True to commit
+
+        :return: replaced values AND the connection object IF commit is False, so that you can review and commit later if need be
+        """
+
+        def float_or_esc_string(val):
+            return val if type(val) != str else "'"+"''".join(val.split("'"))+"'"
+
+        db = 'sources'
+        if type(entry) == str:
+            _where = " WHERE NAME='{}'".format(entry)
+        elif type(entry) == dict:
+            # here we can identify a source based on one or more key, value pairs
+            _keys = list(entry.keys())
+            for _key in _keys:
+                if _key.lower() not in self.field_names:
+                    logger.error('column {} not in {} db'.format(_key, db))
+                    return
+            _where = " WHERE {}={}".format(_keys[0], float_or_esc_string(entry[_keys[0]]))
+            for _key in _keys[1:]:
+                _where += " AND {}={}".format(_key, float_or_esc_string(entry[_key]))
+        else:
+            logger.error('can''t identify {} db row based on entry type {}'.format(db, type(entry)))
+            return
+
+        _keys = list(values.keys())
+        for _key in _keys:
+            if _key.lower() not in self.field_names:
+                logger.error('column {} not in {} db'.format(_key, db))
+                return
+        _set = " SET {}={}".format(_keys[0], float_or_esc_string(values[_keys[0]]))
+        for _key in _keys[1:]:
+            _set += ", {}={}".format(_key, float_or_esc_string(values[_key]))
+
+        con = connect_db()
+
+        # print ("SELECT {} FROM sources{}".format(','.join(_keys),_where))
+        existing_values = pd.read_sql_query("SELECT {} FROM {}{}".format(','.join(_keys), db, _where), con)
+        if len(existing_values) == 0:
+            logger.error("entry clause '{}' returns no matches from {} db, can't update".format(_where[1:], db))
+            return
+        elif len(existing_values) > 1:
+            logger.warning("entry clause '{}' matches multiple rows from {} db, proceed with caution!".format(_where[1:], db))
+
+        command = "UPDATE {}{}{}".format(db, _set, _where)
+        print("UPDATE command:\n  {}\nreplacing existing values of columns {}:".format(command, ','.join(_keys)))
+        print(existing_values)
+
+        if execute == False:
+            logger.info('dry run only, UPDATE command not executed')
+            con.close()
+        else:
+                cur = con.cursor()
+                cur.execute('PRAGMA foreign_keys = ON')  # always do this!
+                cur.execute(command)
+                if commit == False:
+                    logger.info('changes not committed!')
+                    return con, existing_values
+                else:
+                    db_commit(con)
+                    con.close()
+
+        return existing_values
+
+
+    def db_commit(self, con):
+        """
+        Commit changes to the database
+
+        :return: nothing
+        """
+
+        con.commit()
+
+
     def __str__(self):
         """
         Display some information about this object
@@ -2734,6 +2947,11 @@ class Instrument:
             if effarea is None:
                 self.effarea = 100*u.cm**2
                 logger.warning('effective area not supplied, assuming {}'.format(self.effarea))
+            elif not hasattr(effarea, 'unit'):
+                self.effarea = effarea*u.cm**2
+                logger.warning('effective area units not supplied, assuming cm^2')
+            else:
+                self.effarea = effarea
 
         if os.path.isdir('/'.join([MINBAR_ROOT, path])):
             self.path = path
