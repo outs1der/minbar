@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.28.0'
+__version__ = '1.29.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -1974,7 +1974,7 @@ class Observation:
 
 
     def plot(self, figure=None, show=True, show_bursts=True, sym_burst='^r',
-            **kwargs):
+            title=True, **kwargs):
         """
         Plot the observation lightcurve, reading it in first if need be.
         Keyword arguments are passed on to the plot command.
@@ -1991,9 +1991,19 @@ class Observation:
           to be plotted on the same axis (for example)
         :param show: display the figure immediately or not (latter case for
           multiple observations to be plotted together)
+	:param show_bursts: set to True (default) to show any bursts
+          present in the observation
+        :param sym_bursts: symbol used for bursts
+	:param title: set to None to omit the title, or a string for any
+	  specific title, or True for a standard informative title giving
+          source, instrument and observation ID
+
         :return: plot object
         """
+
         ylabel = 'Rate (count s$^{-1}$ cm$^{-2}$)'
+        # def_style = { 'fmt': '.' }
+        def_style = { 'color': 'C0' }
 
         if self.time is None:
             self.get_lc()
@@ -2012,18 +2022,33 @@ class Observation:
             tscale = ''
 
         else:
+            # this is the "normal" lightcurve plot, with bins and errors
             # plt.plot(lc['TIME'],lc['RATE'])
             # plot can't work with "raw" time units
             # the duplication of .mjd is not a typo below! Also the scale method
             # is for Time objects, which mjd should be defined as
-            plt.plot(self.mjd.mjd, self.rate, **kwargs)
+
+            for key in def_style.keys():
+                if key not in kwargs.keys():
+                    kwargs[key] = def_style[key]
+            # plt.plot(self.mjd.mjd, self.rate, **kwargs)
+            if 'fmt' not in kwargs.keys():
+                plt.step(self.mjd.mjd, self.rate, where='mid', **kwargs)
+                plt.errorbar(self.mjd.mjd, self.rate, yerr=self.error, fmt='none', **kwargs)
+            else:
+                plt.errorbar(self.mjd.mjd, self.rate, yerr=self.error, **kwargs)
 
             rate_max = np.nanmax(self.rate)
             rate_range = rate_max-np.nanmin(self.rate)
             tscale = self.mjd.scale.upper()
 
         plt.xlabel('Time (MJD '+tscale+')')
-        # plt.ylabel(ylabel)
+        plt.ylabel(ylabel)
+        if title is not None:
+            if type(title) == str:
+                plt.title(title)
+            else:
+                plt.title("{} {{\\it {}}} obs \#{}".format(self.name, self.instr.name, self.obsid))
 
         if hasattr(self, 'bursts') & show_bursts:
             # also plot the bursts
@@ -2922,6 +2947,11 @@ class Instrument:
             if effarea is None:
                 self.effarea = 100*u.cm**2
                 logger.warning('effective area not supplied, assuming {}'.format(self.effarea))
+            elif not hasattr(effarea, 'unit'):
+                self.effarea = effarea*u.cm**2
+                logger.warning('effective area units not supplied, assuming cm^2')
+            else:
+                self.effarea = effarea
 
         if os.path.isdir('/'.join([MINBAR_ROOT, path])):
             self.path = path
