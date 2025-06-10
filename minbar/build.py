@@ -367,10 +367,11 @@ def get_new(instr, ignore_unmatched=False, sources=None):
                 print("** ERROR ** {} not present in source name list".format(source))
                 return None
 
+    # Load in the existing observations, so we can skip the ones already ingested
     # Need to fix this hard-wired path prior to deployment, or allow the option to use
     # the text file instead
 
-    obs_db = minbar.Observations('../minbar-obs')
+    obs_db = minbar.Observations() # '../minbar-obs')
 
     to_add = {}
     for source in sources:
@@ -387,8 +388,13 @@ def get_new(instr, ignore_unmatched=False, sources=None):
 
             # Check if the observation is already present
 
-            observations = os.scandir(instr.path + '/data/' + instr.source_path[i])
+            # observations = os.scandir(instr.path + '/data/' + instr.source_path[i])
+            observations = os.scandir('/'.join([minbar.MINBAR_ROOT, instr.path, 'data', instr.source_path[i]]))
             # in_dir = set([str.encode(x.name) for x in observations])
+
+            # need to filter here potentially for matching observation directories, and omit
+            # other stuff (e.g. .DS_Store!)
+
             in_dir = set([x.name for x in observations])
 
             new = in_dir.difference(in_db)

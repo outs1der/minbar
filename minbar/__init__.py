@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.27.0'
+__version__ = '1.28.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -2142,7 +2142,7 @@ class Observation:
             # header file; see https://docs.astropy.org/en/stable/time
 
             timesys = header['TIMESYS']
-            timeunit = header['TIMEUNIT']
+            timeunit = header['TIMEUNIT'].lower()
             timepixr = header['TIMEPIXR']
             if 'TIMEZERO' in header:
                 timezero = header['TIMEZERO']*u.Unit(timeunit)
