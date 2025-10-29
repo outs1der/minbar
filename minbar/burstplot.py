@@ -7,7 +7,9 @@ import matplotlib.pyplot as plt
 from matplotlib import gridspec
 import matplotlib.ticker as mticker
 
-def burstplot(bdata, param='flux', show=True, **kwargs):
+import minbar
+
+def burstplot(_bdata, param='flux', show=True, **kwargs):
     """
     General-purpose routine to plot burst data. Would like to be able
     to call this in a number of ways, both with a burst ID from
@@ -84,8 +86,6 @@ def burstplot(bdata, param='flux', show=True, **kwargs):
                          fmt='none',ecolor=color[param])
         ax.set_ylabel(ylabel[param])
 
-    xlabel='Time [s]'
-
     # Set the label names and colours here. To be passed also to
     # plot_param
     # Might need to set up some custom labels for the different
@@ -96,6 +96,38 @@ def burstplot(bdata, param='flux', show=True, **kwargs):
               'rad': 'Blackbody normalisation\n[$(R_{\mathrm{km}}/d_{10\ \mathrm{kpc}})^2$]',
               'chisq': 'Fit $\chi^2/n_{\mathrm{DOF}}$'}
     color = {'r': 'k', 'flux': 'k', 'kT': 'r', 'rad': 'b', 'chisq': 'g'}
+
+    if type(_bdata) != pd.DataFrame:
+        # we can also work on a concord ObservedBurst, but need to have
+        # that package available; see https://github.com/outs1der/concord
+        try:
+            import concord as cd
+        except:
+            minbar.logger.error('required input not pandas DataFrame and concord not available')
+            return None
+
+        if type(_bdata) != cd.ObservedBurst:
+            minbar.logger.error('required input not pandas DataFrame or concord ObservedBurst')
+            return None
+
+        # convert ObservedBurst to pandas table
+        bdata = pd.DataFrame({'time': _bdata.time, 'dt': _bdata.dt,
+            'flux': _bdata.flux/minbar.FLUX_U, 'flux_err': _bdata.flux_err/minbar.FLUX_U})
+        for _param in ylabel:
+            for key in (_param, _param+'_min', _param+'_max', _param+'err',
+                _param+'_err', 'e_'+_param):
+                if hasattr(_bdata, key) & (key not in bdata.columns):
+                    # print ('hasattr: {}'.format(key))
+                    # if assigning new columns like this, don't want units
+                    if hasattr(getattr(_bdata, key), 'unit'):
+                        bdata[key] = getattr(_bdata, key).value
+                    else:
+                        bdata[key] = getattr(_bdata, key)
+            
+    else:
+        bdata = _bdata.copy()
+
+    xlabel='Time [s]'
 
     # check that the passed labels match one of the above
 
