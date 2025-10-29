@@ -41,22 +41,45 @@ def burstplot(bdata, param='flux', show=True, **kwargs):
         :param color: dict of colors, param names as key
         """
 
-        has_error = np.all([x in bdata for x in [param+'_min',param+'_max']]) | (param == 'r')
+        has_error = np.all([x in bdata for x in [param+'_min',param+'_max']])\
+            | (param+'err' in bdata) | (param+'_err' in bdata) \
+            | ('e_'+param in bdata) 
+            # | (param == 'r') redundant, for MINBAR data
 
         # filter on good data
-        _gd = bdata.flux*bdata.fluxerr > 0
+        # _gd = bdata.flux*bdata.fluxerr > 0
+        _gd = bdata.flux > 0
+        if 'fluxerr' in bdata:
+            _gd = bdata.flux*bdata.fluxerr > 0
 
         # add an extra value copy here to plot that last step
         ax.step(np.append(bdata.time[_gd].values,
             bdata.time[_gd][-1:].values+bdata.dt[_gd][-1:].values),
             np.append(bdata[param][_gd].values,bdata[param][_gd][-1:].values),
             where='post',color=color[param])
+
         if has_error:
+            # plot errors
+            yerr = None
             if param == 'r':
+                # special convention here for the radius
                 yerr = bdata['re'][_gd]
             else:
-                yerr = np.stack((bdata[param][_gd]-bdata[param+'_min'][_gd],
-                    bdata[param+'_max'][_gd]-bdata[param][_gd]))
+                # want to accommodate more than one label on the errors
+                try:
+                    yerr = np.stack((bdata[param][_gd]-bdata[param+'_min'][_gd],
+                        bdata[param+'_max'][_gd]-bdata[param][_gd]))
+                except:
+                    # we don't have <param>_min, <param>_max so have to
+                    # use whatever's present
+                    if param+'err' in bdata:
+                        yerr = bdata[param+'err'][_gd]
+                    elif param+'_err' in bdata:
+                        yerr = bdata[param+'_err'][_gd]
+                    elif 'e_'+param in bdata:
+                        yerr = bdata['e_'+param][_gd]
+
+            assert yerr is not None
             ax.errorbar(bdata.time[_gd]+bdata.dt[_gd]/2., bdata[param][_gd], yerr,
                          fmt='none',ecolor=color[param])
         ax.set_ylabel(ylabel[param])
