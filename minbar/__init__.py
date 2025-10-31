@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.31.0'
+__version__ = '1.31.1'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -786,9 +786,12 @@ class Minbar(IDLDatabase):
             # The field method restricts returns to a single attribute
             # return self.get_records().field(field)
             return self.get_records()[field]
+        elif hasattr(self, field) & (np.shape(field) == ()):
+            # no support presently for get'ting two or more attributes
+            return getattr(self, field)[self.ind]
         else:
             # Really need to check that the attributes are all present here
-            return getattr(self, field)[self.ind]
+            logger.error('one or more fields not present in data table')
 
 
     def get_records(self):
@@ -2453,14 +2456,16 @@ class Sources:
         # if field.lower() in self._fits_names:
         # data = self._f[1].data[field]
             data = self.table[field_trans]
-        else:
+        elif hasattr(self, field) & (np.shape(field) == ()):
             # If not in the fits file, see if it is an attribute
             return getattr(self, field)
+        else:
+            logger.error('one or more fields not present in Sources table')
 
         if all or self.selection is None:
             return data
         else:
-            return data
+            return data[self.selection]
 
 
     def __getitem__(self, field):
