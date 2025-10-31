@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.31.1'
+__version__ = '1.31.2'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -786,9 +786,16 @@ class Minbar(IDLDatabase):
             # The field method restricts returns to a single attribute
             # return self.get_records().field(field)
             return self.get_records()[field]
-        elif hasattr(self, field) & (np.shape(field) == ()):
-            # no support presently for get'ting two or more attributes
-            return getattr(self, field)[self.ind]
+        elif (np.shape(field) == ()):
+            if hasattr(self, field):
+                # no support presently for get'ting two or more attributes
+                # TODO do we need a check here that the attribute is an
+                # array of same length as the burst table? E.g. are there
+                # no scalar attributes?? (attribute "names" has length
+                # equal to the number of sources comprising the sample...)
+                return getattr(self, field)[self.ind]
+            else:
+                logger.error('no such field or attribute: {}'.format(field))
         else:
             # Really need to check that the attributes are all present here
             logger.error('one or more fields not present in data table')
@@ -2456,9 +2463,16 @@ class Sources:
         # if field.lower() in self._fits_names:
         # data = self._f[1].data[field]
             data = self.table[field_trans]
-        elif hasattr(self, field) & (np.shape(field) == ()):
+        elif (np.shape(field) == ()):
             # If not in the fits file, see if it is an attribute
-            return getattr(self, field)
+            if hasattr(self, field):
+                # TODO may need to modify for consistency with Minbar.get()
+                # which returns an attribute indexed by self.ind (the
+		# ordering array for the current selection, which will
+		# work for attributes the same length as the data table)
+                return getattr(self, field)
+            else:
+                logger.error('no such field or attribute: {}'.format(field))
         else:
             logger.error('one or more fields not present in Sources table')
 
