@@ -1,5 +1,18 @@
 """
-Classes to analyse data and add to MINBAR
+Functions to analyse data and add to MINBAR
+
+def connect_db():
+def scrape_jeanslist():
+def match_name(name, name2, name3=None, comments=None):
+def write_wiki_csv(outfile='minbar_sources_new.csv', con=None):
+def verify_sources(con):
+def update_ref(ref, minbar_id, ref_id=None, execute=True, commit=False):
+def get_new(instr, ignore_unmatched=False, sources=None):
+def analyse(instr, obs):
+def burst_verify(candidates):
+def burst_search(instr, src, obsid):
+def update(instr, obs):
+def write_minbar(minbar_obj=None, source='db', savefile=None):
 
 Prior to running this part of the code, it is assumed that the user has assembled a set of data
 in a data directory, organised by source and observation ID. E.g. for JEM-X, the data directory
@@ -283,9 +296,13 @@ def verify_sources(con):
 
 def update_ref(ref, minbar_id, ref_id=None, execute=True, commit=False):
     """
-    This routine is to update the burst reference table with new entries
+    This routine is to update the burst reference table with new entries.
+    For example, say Smith et al. (2025) discuss the properties of burst
+    2216 (but just that burst, so they don't give it a label or anything),
+    in which case you'd want to add this reference as
 
-    :param con: connection to the database
+    build.update_ref('smith25', 2216, '', commit=True)
+
     :param ref: bibliographic string, e.g. alizai23 (last name & 2-digit year, as listed in all.bib)
     :param minbar_id: list of MINBAR IDs to which the bursts correspond
     :param ref_id: array of IDs as in the reference; could be strings or letters, or nothing
@@ -477,4 +494,87 @@ def update(instr, obs):
     pass
 
 
+def write_minbar(minbar_obj=None, source='db', savefile=None):
+    """
+    Method to write a table to a text file, replicating the original
+process by which the DR1 tables were created
 
+    :param minbar_obj: MINBAR object to write; if omitted, will write all 3 objects
+    :param source: source of data; defaults to 'db'
+    :param savefile: name of savefile to write to; if omitted, will write to standard out
+    """
+
+    if minbar_obj is None:
+        # if you haven't supplied an object, we need to get it from
+        # whatever source is specified
+
+        if not (source in ['db']):
+            minbar.logger.error('source {} not currently supported'.format(source))
+            return None
+
+        if savefile is not None:
+            # user needs to supply three savefiles 
+            if len(savefile) != 3:
+                minbar.logger.error('need to supply a savefile name for each of the three objects: Bursts, Observations and Sources')
+                return None
+        else:
+            savefile=['minbar_dr2.txt', 'minbar-obs_dr2.txt', 'minbar-sources_dr2.txt']
+
+        minbar.logger.info('reading MINBAR data from {}'.format(source))
+        o = minbar.Observations(source)
+        s = minbar.Sources(source)
+
+        write_minbar(o.bursts, savefile=savefile[0])
+        write_minbar(o, savefile=savefile[1])
+        write_minbar(s, savefile=savefile[2])
+
+        return
+
+    # now actually do the write part
+
+    if type(minbar_obj) == minbar.Bursts:
+        # as of 2025 Nov, this produces a file that (up to the header and
+        # whitespace) is identical to the DR1 MRT file. But need more work to
+        # future-proof it, including
+        # - a way to update the burst references
+
+        if savefile is not None:
+            minbar.logger.info('writing object as MINBAR bursts table to file {}'.format(savefile))
+
+        # TODO also need to write the burst reference list
+        ascii.write(minbar_obj.records, output=savefile, overwrite=True, 
+            # can use this to fill the blank numbers, but it doesn't respect the format
+            format='mrt', fill_values=[(ascii.masked, 0.0)], 
+            # formats could be part of the table
+            # copied from the DR1 MRT file
+            formats={'name': '<23', 'instr': '<3', 'obsid': '<15',
+                'time': '11.5f', 'entry': '4d', 'entry_obs': '6d', 'bnum': '4d',
+                'xref': '4d', 'mult': '1d', 'angle': '7.2f', 'vigcorr': '5.3f',
+                'sflag': '<11', 'rexp': '5.2f', 'rise': '5.2f', 'tau': '5.1f',
+                'e_tau': '5.1f', 'dur': '6.1f', 'e_dur': '6.1f', 'edt': '6.1f',
+                'e_edt': '7.3f', 'tdel': '8.1f', 'trec': '7.1f',
+                'perflx': '6.3f', 'e_perflx': '6.3f', 'alpha': '6.1f',
+                'e_alpha': '6.1f', 'bc': '5.3f', 'e_bc': '5.3f',
+                'gamma': '6.4f', 'sc': '6.3f', 'hc': '6.3f', 's_z': '6.3f',
+                'pflux': '6.2f', 'e_pflux': '5.2f', 'fluen': '8.3f',
+                'e_fluen': '7.3f', 'bpflux': '6.2f', 'e_bpflux': '5.2f',
+                'kT': '4.2f', 'e_kT': '4.2f', 'rad': '6.1f', 'e_rad': '5.1f',
+                'bfluen': '6.4f', 'e_bfluen': '6.4f', 'refs': '<20'})
+
+    elif type(minbar_obj) == minbar.Observations:
+        minbar.logger.info('writing object as MINBAR observations table')
+        minbar.logger.info('(not yet implemented)')
+        return
+
+    elif type(minbar_obj) == minbar.Sources:
+        minbar.logger.info('writing object as MINBAR sources table')
+        minbar.logger.info('(not yet implemented)')
+        return
+
+    else:
+        minbar.logger.error('unknown type for object {}'.format(minbar))
+
+    return
+
+
+print('loaded build tools')
