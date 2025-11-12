@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.31.2'
+__version__ = '1.32.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -587,9 +587,10 @@ class Minbar(IDLDatabase):
         """
         self.name = ''
         self.selection = self.get_type()
-        self.order_field = self.timefield
-        self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
-        self.ind = np.where(self.selection)[0][self.order]
+        self.order_field, self.ascending = self.timefield, True
+        self.sort(self.order_field, self.ascending)
+        # self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
+        # self.ind = np.where(self.selection)[0][self.order]
 
 
     def select(self, value, attribute='name', exclude=False):
@@ -644,8 +645,9 @@ class Minbar(IDLDatabase):
 
         # Retain the time order for the index
 
-        self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
-        self.ind = np.where(self.selection)[0][self.order]
+        self.sort(self.order_field, self.ascending)
+        # self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
+        # self.ind = np.where(self.selection)[0][self.order]
         if attribute == 'name':
             self.name = value
             logger.info('{} {} {}s from {}'.format(action, n_action, self.entryname, self.name))
@@ -658,8 +660,8 @@ class Minbar(IDLDatabase):
 
     def sort(self, attribute='time', ascending=True, descending=False):
         """
-        Basic sort functionality; will modify the default ordering of the selection,
-        until another sort parameter is chosen, or a call to
+        Sort functionality; will modify the default ordering of the selection,
+        until another sort parameter (or combination thereof) is chosen, or a call to
 	:meth:`minbar.Minbar.clear` is made (which replaces the default
         sort field as time)
 
@@ -668,19 +670,36 @@ class Minbar(IDLDatabase):
         | b.sort('tdel',descending=True) # sort the selected bursts in descending order
         |                                #   of the time since the last burst
 
-        :param attribute: (single) table attribute to sort on
+        | b.sort(['rexp','bpflux'])      # sort the bursts first by the rexp flag,
+        |                                #   then by the peak bolometric flux
+
+        :param attribute: table attribute or array of atrributes to sort on
         :param ascending: set to False to sort descending instead
-        :param descending: set to True to sort descending instead
+        :param descending: set to True to sort descending instead; overrides ascending
         :return: sorted object
         """
 
-        if attribute not in self.field_names:
-            logger.error('attribute {} not present in table, skipping sort'.format(attribute))
-            return self
+        if np.shape(attribute) == ():
+            attribute = [attribute]
+        sort_tuple = ()
+        for _attribute in attribute:
+            if _attribute.upper() == 'RA_OBJ':
+                # special here for sorting by source RA, time
+                # TODO probably useful to just read in the source table as
+                # part of the Minbar object
+                s = Sources('db' if self.source == 'db' else 'fits')
+                ra_obj = [s.table[s['name'] == x]['RA_OBJ'].values[0] for x in self.records[self.selection]['name']]
+                sort_tuple = (ra_obj, *sort_tuple)
+            elif _attribute not in self.field_names:
+                logger.error('attribute {} not present in table, skipping sort'.format(attribute))
+                return self
+            else:
+                sort_tuple = (self.records[self.selection][_attribute], *sort_tuple)
 
         self.order_field = attribute
-        self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
-        if (not ascending) or descending:
+        # self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
+        self.order, self.ascending = np.lexsort(sort_tuple), ascending and (not descending)
+        if (not self.ascending):
             self.order = self.order[::-1]
         self.ind = np.where(self.selection)[0][self.order]
 
@@ -959,17 +978,22 @@ class Minbar(IDLDatabase):
             if len(names) > 1:
                 logger.info('{} more matching sources: {}'.format(len(names) - 1, ', '.join(names[1:])))
 
+
     def exclude_flag(self, flags):
         """
         Removes entries with flags matching one or more labels from the current selection.
         """
+
+        _n_init = sum(self.selection)
         selection = [re.search('['+flags+']',x) is None for x in self.records['sflag']]
         self.selection = np.logical_and(self.selection, selection)
-        self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
-        if len(np.where(self.selection)[0]) < len(self.ind):
-            logger.info('excluded {} {}s by excluding flag(s) {}'.format(len(self.ind)-len(np.where(self.selection)[0]),
+        # keep sorted
+        self.sort(self.order_field, self.ascending)
+        # self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
+        if sum(self.selection) < _n_init:
+            logger.info('excluded {} {}s by excluding flag(s) {}'.format(_n_init-sum(self.selection),
                     self.entryname, flags))
-        self.ind = np.where(self.selection)[0][self.order]
+        # self.ind = np.where(self.selection)[0][self.order]
 
 
 class Bursts(Minbar):
@@ -1364,8 +1388,9 @@ class Bursts(Minbar):
                 len(np.where(selection)[0]), rexp_thresh, marginal_incl))
             self.selection = selection
 
-        self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
-        self.ind = np.where(self.selection)[0][self.order]
+        self.sort(self.order_field, self.ascending)
+        # self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
+        # self.ind = np.where(self.selection)[0][self.order]
 
         return self
 
@@ -1377,6 +1402,8 @@ class Bursts(Minbar):
 
         :return: class object
         """
+
+        _n_init = sum(self.selection)
         instr_label = [x[0:2] for x in self['instr']]
         set_instr_label = set(instr_label)
         if len(set_instr_label.difference({'IJ','SW','XP'})) > 0:
@@ -1386,12 +1413,13 @@ class Bursts(Minbar):
                                   np.char.array(self.records['instr']).startswith('XP'))
         self.selection = np.logical_and(self.selection, selection)
 
-        self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
-        n_excluded = len(self.ind) - len(np.where(self.selection)[0])
+        self.sort(self.order_field, self.ascending)
+        # self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
+        n_excluded = _n_init - sum(self.selection)
         if n_excluded > 0:
             logger.info('selected {} unique {}s by excluding {}'.format(len(np.where(self.selection)[0]),
                     self.entryname, n_excluded))
-        self.ind = np.where(self.selection)[0][self.order]
+        # self.ind = np.where(self.selection)[0][self.order]
 
         # Return self so we can "cascade" selections
 
@@ -1555,14 +1583,17 @@ class Observations(Minbar):
 
         :return: class object
         """
+
+        _n_init = sum(self.selection)
         self.exclude_flag('bcdefg')
         selection = (self.records['flux'] > 3.*self.records['e_flux']) & (self.records['sig'] >= 3.)
         self.selection = np.logical_and(self.selection, selection)
-        self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
-        if len(np.where(self.selection)[0]) < len(self.ind):
+        self.sort(self.order_field, self.ascending)
+        # self.order = np.argsort(self.records[self.selection].field(self.order_field).value)
+        if sum(self.selection) < _n_init:
             logger.info('Restricted to {} "good" {}s by also excluding nondetections'.format(
-                len(np.where(self.selection)[0]), self.entryname))
-        self.ind = np.where(self.selection)[0][self.order]
+                sum(self.selection), self.entryname))
+        # self.ind = np.where(self.selection)[0][self.order]
 
         return self
 
