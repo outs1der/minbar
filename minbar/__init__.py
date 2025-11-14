@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.33.0'
+__version__ = '1.33.0dev'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -390,6 +390,16 @@ Possible inconsistencies in the directory tree;
 You should check your source to directory name mapping""".format(nonmatched, nmissing))
 
     return has_dir, nonmatched, nmissing
+
+
+def pca_time_to_mjd_tt(time, mjdrefi=49353.0, mjdreff=0.000696574074):
+    """
+    convert raw times to MJD (TT) here; see https://heasarc.gsfc.nasa.gov/docs/xte/abc/time_tutorial.html
+    can check results using https://heasarc.gsfc.nasa.gov/cgi-bin/Tools/xTime
+    """
+
+    # return Time( time.to('d') + (header['MJDREFI'] + header['MJDREFF'])*u.d, format='mjd', scale='tt') # TT
+    return Time( time.to('d') + (mjdrefi + mjdreff)*u.d, format='mjd', scale='tt') # TT
 
 
 class Minbar(IDLDatabase):
@@ -1723,7 +1733,7 @@ class Observation:
     """
 
 
-    def __init__(self, obs_entry=None, instr=None, name=None, obsid=None):
+    def __init__(self, obs_entry=None, instr=None, name=None, obsid=None, path=None):
         """
         Create an observation instance, either from a MINBAR obs entry, or by-hand
         Ideally this object should make available every parameter in the MINBAR observation table
@@ -1751,6 +1761,7 @@ class Observation:
         :param instr: :class:`minbar.Instrument` object corresponding to the source instrument for these data
         :param source: source name
         :param obsid: observation ID
+        :param path: absolute path to observation directory; overrides the default provided by the Instrument class
 
         :returns: None
         """
@@ -1804,6 +1815,11 @@ class Observation:
         self.instr = instr
         self.name = name
         self.obsid = obsid
+
+        # Custom paths here
+
+        if path is not None:
+            self.path = '/'.join((path, obsid))
 
         # Define parameters for the lightcurve; later this might be a class
         # The lightcurve might also not be available, so don't force it to be read in now
@@ -1971,45 +1987,51 @@ class Observation:
         """
 
         instr = self.instr.label
-        if not self.instr.local_data:
-            logger.warning('no local data is present, check your MINBAR_ROOT')
-            return None
-
-        _match = np.where(self.instr.source_name == self.name)[0]
-        # print (_match)
-        assert len(_match) == 1
-        # if len(_match) > 1:
-            # logger.warning("multiple source name matches for path")
-        if self.instr.label == 'SW':
-            # WFC doesn't have individual directories for sources
-            path = '/'.join([MINBAR_ROOT, self.instr.path, 'data'])
-            if os.path.isdir(path):
-                return path
-        elif self.instr.has_dir[_match[0]]:
-            # this only implies that there is a source directory for this
-            # object, NOT that the obs directory exists
-            path = '/'.join([MINBAR_ROOT, self.instr.path, 'data',
-                     self.instr.source_path[_match[0]],
-                     self.obsid])
-            if os.path.isdir(path):
-                # the "split" option is only relevant for PCA/XTE data
-                if (not split) or (instr != 'XP'):
-                    return path
-                else:
-                    # PCA data are sometimes split over multiple paths, so
-                    # try to find those here
-                    i, path_arr = 0, [path]
-                    while (os.path.isdir(path+str(i))):
-                        path_arr.append(path+str(i))
-                        i +=1
-                    # if no additional directories are found, this routine will
-                    # still return a (single-element) list, but I think that's
-                    # OK
-                    return path_arr
-            else:
-                logger.warning('directory {} not found locally'.format(path))
+        if hasattr(self, 'path'):
+            # Observation path overrides normal tree
+            path = self.path
+        else:
+            # this block for observations in the default tree
+            if not self.instr.local_data:
+                logger.warning('no local data is present, check your MINBAR_ROOT')
                 return None
 
+            _match = np.where(self.instr.source_name == self.name)[0]
+            # print (_match)
+            assert len(_match) == 1
+            # if len(_match) > 1:
+                # logger.warning("multiple source name matches for path")
+            if self.instr.label == 'SW':
+                # WFC doesn't have individual directories for sources
+                path = '/'.join([MINBAR_ROOT, self.instr.path, 'data'])
+                if os.path.isdir(path):
+                    return path
+            elif self.instr.has_dir[_match[0]]:
+                # this only implies that there is a source directory for this
+                # object, NOT that the obs directory exists
+                path = '/'.join([MINBAR_ROOT, self.instr.path, 'data',
+                         self.instr.source_path[_match[0]],
+                         self.obsid])
+
+        # we now have the path, and check if it's a directory
+
+        if os.path.isdir(path):
+            # the "split" option is only relevant for PCA/XTE data
+            if (not split) or (instr != 'XP'):
+                return path
+            else:
+                # PCA data are sometimes split over multiple paths, so
+                # try to find those here
+                i, path_arr = 0, [path]
+                while (os.path.isdir(path+str(i))):
+                    path_arr.append(path+str(i))
+                    i +=1
+                # if no additional directories are found, this routine will
+                # still return a (single-element) list, but I think that's
+                # OK
+                return path_arr
+        else:
+            logger.warning('directory {} not found locally'.format(path))
 
         return None
 
@@ -2019,14 +2041,6 @@ class Observation:
         Return the lightcurve for a particular observation; this is a replacement for the IDL routine get_lc.pro
         This routine also populates the time, mjd_tt, mjd, rate, and error attributes for the observation
         """
-
-        def pca_time_to_mjd_tt(time, header):
-            """
-            convert raw times to MJD (TT) here; see https://heasarc.gsfc.nasa.gov/docs/xte/abc/time_tutorial.html
-            can check results using https://heasarc.gsfc.nasa.gov/cgi-bin/Tools/xTime
-            """
-
-            return Time( time.to('d') + (header['MJDREFI'] + header['MJDREFF'])*u.d, format='mjd', scale='tt') # TT
 
         def read_fits_lc(file, effarea = 1.*u.cm**2):
             """
@@ -2086,7 +2100,7 @@ class Observation:
             # print (header['INSTRUME'])
             if instrument == 'PCA':
 
-                mjd_tt = pca_time_to_mjd_tt(time, header)
+                mjd_tt = pca_time_to_mjd_tt(time, header['MJDREFI'], header['MJDREFF'])
                 mjd = mjd_tt.utc
 
                 # not sure if GTI arrays exist for other instruments
@@ -2094,7 +2108,7 @@ class Observation:
                 for _gti in gti_ext:
                     gti = np.append(gti, _gti)#, axis=1)
 
-                return time, timepixr, timezero, rate, error, timesys, timeunit, mjd, pca_time_to_mjd_tt(gti*u.Unit(timeunit), header).utc
+                return time, timepixr, timezero, rate, error, timesys, timeunit, mjd, pca_time_to_mjd_tt(gti*u.Unit(timeunit), header['MJDREFI'], header['MJDREFF']).utc
             else:
                 # for all other instruments we just add the MJDREF or MJDREFI, MJDREFF
                 # don't modify the time array; keep that as the raw units from the file

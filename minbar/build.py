@@ -7,6 +7,7 @@ def match_name(name, name2, name3=None, comments=None):
 def write_wiki_csv(outfile='minbar_sources_new.csv', con=None):
 def verify_sources(con):
 def update_ref(ref, minbar_id, ref_id=None, execute=True, commit=False):
+def generate_ref_list(minbar_bursts):
 def get_new(instr, ignore_unmatched=False, sources=None):
 def analyse(instr, obs):
 def burst_verify(candidates):
@@ -49,6 +50,11 @@ import logging
 import requests
 import re
 import bs4
+
+from astropy.io import fits
+import glob
+from astropy.coordinates import SkyCoord
+import astropy.units as u
 
 def connect_db():
     """
@@ -352,6 +358,52 @@ def update_ref(ref, minbar_id, ref_id=None, execute=True, commit=False):
         con.close()
 
 
+def generate_ref_list(minbar_bursts):
+    """
+    This function goes through the list of bursts, and generates new
+    (numbered) reference lists for each burst, along with a running list
+    of references
+
+    :param minbar_bursts: MINBAR Bursts object, with appropriate sorting
+
+    :returns: new refs column for all the bursts, and the ordered list of reference biblabels
+    """
+
+    if minbar_bursts.order_field != ['ra_obj','time']:
+        minbar.logger.error('Bursts object needs to be sorted by ra_obj, time for the ordered output!')
+        return None, None
+
+    minbar.logger.info('generating new reference list...')
+
+    con = connect_db()
+    # read in the entire burst ref table here
+
+    refs = pd.read_sql_query("SELECT * FROM burst_ref", con)
+
+    ref_col = []
+    ord_refs = [] # running array for refs
+    for i, entry in enumerate(minbar_bursts['entry']):
+        n_refs = [] # array collecting refs for this burst
+        match = refs['entry_minbar'] == entry
+        if np.any(match):
+            for ref in refs[match]['ref_code']:
+                if ref.strip() not in ord_refs:
+                    ord_refs.append(ref.strip())
+                n_refs.append(ord_refs.index(ref.strip())+1)
+
+            # print (entry, b['refs'][i], ''.join(str(n_refs)[1:-1].split(' ')))
+            ref_col.append(''.join(str(n_refs)[1:-1].split(' ')))
+        else:
+            ref_col.append('-')
+            if minbar_bursts['refs'][i] != '-':
+                # no matches, so ref should be null
+                minbar.logger.warning('non-null refs in table but no refs found in db for burst {}'.format(entry))
+
+    minbar.logger.info('... new reference list complete')
+
+    return ref_col, ord_refs
+
+
 # This group of functions are intended to work on observations and candidate events from
 # any instrument; need to pass only enough information e.g. lightcurve path(s), candidate
 # times, significance etc. to allow verification
@@ -421,6 +473,117 @@ def get_new(instr, ignore_unmatched=False, sources=None):
             print("Skipping {}, no matching source directory".format(source))
 
     return to_add
+
+
+def get_obs_info(test_dir, target_dir, debug=False):
+    """Here we want to gather basic information about the observation data contained in the directory of interest:
+    the source name(s), pointing coordinates, time range etc.
+    minbar-obs columns: name, instr, obsid, tstart, tstop, [ra_obj, dec_obj], angle
+    
+    :param test_dir: directory name to scan
+    :param path: absolute path in which the test_dir resides
+    :param debug: set to True to provide debugging info
+    
+    :returns: (MINBAR) name, instr flag (may be preliminary), obsid, MJD start, stop, pointing RA, Dec (degrees), target separation (arcmin)
+    """
+
+    def get_fmi(path):
+        """
+        Function to return the basic FMI information from an RXTE directory
+
+        :param path: path to a (presumed) RXTE data directory, for example downloaded from the archive
+
+        :returns: tuple with target name, RA & Dec, ObsID, start & stop times (MJD)
+        """
+
+        fmi_file = '/'.join((path, 'FMI'))
+        if os.path.isfile(fmi_file):
+            hdul = fits.open(fmi_file)
+
+            header = hdul[0].header
+            # print (header['MJDREFI'], header['MJDREFF'])
+            # hdul.info()
+            # print (hdul[1].data)#.data[0])
+            _name, _ra_obj, _dec_obj = hdul[1].data[0]['Source'], hdul[1].data[0]['RA'], hdul[1].data[0]['Dec']
+            _obsid, _metstart, _metstop = hdul[1].data[0]['ObsId'], hdul[1].data[0]['StartMET'], hdul[1].data[0]['StopMET']
+            # print(np.array(hdul[1].data[0])[[0,1,2,10,11,12]])#.header
+            hdul.close()
+
+            _tstart = minbar.pca_time_to_mjd_tt(_metstart*u.s, header['MJDREFI'], header['MJDREFF'])
+            _tstop = minbar.pca_time_to_mjd_tt(_metstop*u.s, header['MJDREFI'], header['MJDREFF'])
+
+            return _name, _ra_obj, _dec_obj, _obsid, _tstart, _tstop
+
+        else:
+            return None
+
+    if debug:
+        print ('scanning directory {}, subdirectory {}'.format(target_dir, test_dir))
+        
+    try:
+        # test for RXTE INDEX file here
+        _name_FMI, _ra_obj, _dec_obj, _obsid, _tstart, _tstop = get_fmi('/'.join((target_dir, test_dir)))
+        # print(np.array(hdul[1].data[0])[[0,1,2,10,11,12]])#.header
+            
+        if debug:
+            print ("Got XTE FMI file, obsid {}, target {} (RA={:.5f}, Dec={:.5f}), time range MJD {:.5f}-{:.5f}".format(
+                _obsid, _name_FMI, _ra_obj, _dec_obj, _tstart.value, _tstop.value))
+
+        if (len(_obsid) == 15):
+            if _obsid[-1] in 'ASZ':
+                minbar.logger.warning ('obsid suffix indicates slew/scan data, suggest ignoring')
+            elif _obsid[-1] in '0123456789':
+                minbar.logger.warning ('part n>1 of a multi-part observation, find the root (presumably {})'.format(
+                    _obsid[:-1]))
+        else:
+            # check for multi-parts
+            # print ('/'.join((target_dir, test_dir))+'?')
+            additional = glob.glob('/'.join((target_dir, test_dir))+'?')
+            if additional != []:
+                if debug:
+                    print ('Got additional obsID directories: {}'.format(additional))
+                _obsid = [_obsid]
+                for _dir in additional:
+                    _obsid.append(_dir.split('/')[-1:][0])
+                    _name2, _ra_obj2, _dec_obj2, _obsid2, _tstart2, _tstop2 = get_fmi(_dir)
+                    assert _name2 == _name_FMI
+                    _tstart = min([_tstart, _tstart2])
+                    _tstop = max([_tstop, _tstop2])
+                    # print ("Got XTE FMI file, obsid {}, target {} (RA={}, Dec={}), time range MET {}-{}".format(
+                    # _obsid2, _name2, _ra_obj2, _dec_obj2, _tstart2, _tstop2))
+
+            # perform cone search for source in MINBAR.Source, make sure of an unambiguous ID
+            s = minbar.Sources()
+            c = SkyCoord(ra=s['ra_obj']*u.degree, dec=s['dec_obj']*u.degree, frame='icrs')
+            t = SkyCoord(ra=_ra_obj*u.degree, dec=_dec_obj*u.degree, frame='icrs')
+            sep = t.separation(c)
+
+            in_fov = sep < 1*u.degree
+            if debug:
+                print ('measured separation vs. MINBAR sources, got {} within FoV'.format(sum(in_fov)))
+            
+            # _name_FMI = _name#.copy()
+            
+            if sum(in_fov) == 0:
+                minbar.logger.error ('no MINBAR sources in the FoV, have you got the right observation?')
+                return None
+            elif sum(in_fov) == 1:
+                _name = s['name'][in_fov]
+            else:
+                _name = s['name'][np.argmin(sep)]
+                _sep = min(sep)
+                minbar.logger.warning ('more than one source in the FoV, selecting the closest to the aimpoint ({} =? {}, offset by {:.3f})'.format(_name, _name_FMI, min(sep)))
+
+            # set the instrument name, we can't yet know the full label
+            _instr = 'PCA'
+            # RXTE section complete
+
+        return _name, _instr, _obsid[0], _tstart.value, _tstop.value, _ra_obj, _dec_obj, _sep.to('arcmin').value
+    
+    except:
+        # something went wrong, so presumably this is not an RXTE observation
+        minbar.logger.warning ('information gathering for RXTE observation failed, falling back on... nothing for now')
+        pass
 
 
 def analyse(instr, obs):
@@ -541,7 +704,8 @@ process by which the DR1 tables were created
         if savefile is not None:
             minbar.logger.info('writing object as MINBAR bursts table to file {}'.format(savefile))
 
-        # TODO also need to write the burst reference list
+        # it is assumed you have already re-generated the burst reference
+        # list prior to this step; see build.generate_ref_list
         ascii.write(minbar_obj.records, output=savefile, overwrite=True, 
             # can use this to fill the blank numbers, but it doesn't respect the format
             format='mrt', fill_values=[(ascii.masked, 0.0)], 
