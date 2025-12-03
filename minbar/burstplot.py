@@ -43,6 +43,9 @@ def burstplot(_bdata, param='flux', show=True, **kwargs):
         :param color: dict of colors, param names as key
         """
 
+        # boolean to determine whether the parameter has an error, but doesnt' tell you 
+        # what the _name_ of that error parameter is
+
         has_error = np.all([x in bdata for x in [param+'_min',param+'_max']])\
             | (param+'err' in bdata) | (param+'_err' in bdata) \
             | ('e_'+param in bdata) 
@@ -111,8 +114,9 @@ def burstplot(_bdata, param='flux', show=True, **kwargs):
             return None
 
         # convert ObservedBurst to pandas table
+        # new names for error component of flux, below - 2025 Dec
         bdata = pd.DataFrame({'time': _bdata.time, 'dt': _bdata.dt,
-            'flux': _bdata.flux/minbar.FLUX_U, 'flux_err': _bdata.flux_err/minbar.FLUX_U})
+            'flux': _bdata.flux/minbar.FLUX_U, 'flux_err': _bdata.e_flux/minbar.FLUX_U})
         for _param in ylabel:
             for key in (_param, _param+'_min', _param+'_max', _param+'err',
                 _param+'_err', 'e_'+_param):

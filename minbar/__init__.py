@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.33.0dev'
+__version__ = '1.33.1dev'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
