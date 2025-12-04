@@ -74,6 +74,8 @@ def burstplot(_bdata, param='flux', show=True, **kwargs):
                 try:
                     yerr = np.stack((bdata[param][_gd]-bdata[param+'_min'][_gd],
                         bdata[param+'_max'][_gd]-bdata[param][_gd]))
+                    # yerr = np.stack((bdata[param][_gd]-bdata[param+'_min'][_gd],
+                    #     bdata[param+'_max'][_gd]-bdata[param][_gd]))
                 except:
                     # we don't have <param>_min, <param>_max so have to
                     # use whatever's present
@@ -118,8 +120,10 @@ def burstplot(_bdata, param='flux', show=True, **kwargs):
         bdata = pd.DataFrame({'time': _bdata.time, 'dt': _bdata.dt,
             'flux': _bdata.flux/minbar.FLUX_U, 'flux_err': _bdata.e_flux/minbar.FLUX_U})
         for _param in ylabel:
-            for key in (_param, _param+'_min', _param+'_max', _param+'err',
-                _param+'_err', 'e_'+_param):
+            for key in (_param, 'e_'+_param, 'E_'+_param,
+                        # problem with _min, _max params coming from concord.ObservedBurst
+                        # _param+'_min', _param+'_max',
+                _param+'err', _param+'_err'):
                 if hasattr(_bdata, key) & (key not in bdata.columns):
                     # print ('hasattr: {}'.format(key))
                     # if assigning new columns like this, don't want units
