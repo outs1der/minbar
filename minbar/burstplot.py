@@ -54,8 +54,8 @@ def burstplot(_bdata, param='flux', show=True, **kwargs):
         # filter on good data
         # _gd = bdata.flux*bdata.fluxerr > 0
         _gd = bdata.flux > 0
-        if 'fluxerr' in bdata:
-            _gd = bdata.flux*bdata.fluxerr > 0
+        if 'flux_err' in bdata:
+            _gd = bdata.flux*bdata.flux_err > 0
 
         # add an extra value copy here to plot that last step
         ax.step(np.append(bdata.time[_gd].values,
