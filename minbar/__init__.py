@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.32.1'
+__version__ = '1.33.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -536,7 +536,7 @@ class Minbar(IDLDatabase):
         """
         Fix the whitespace in the labels when reading in the IDL version.
         """
-        pat = re.compile('\s+')
+        pat = re.compile(r'\s+')
         for k in self.field_labels:
             self.field_labels[k] = re.sub(pat, ' ', self.field_labels[k])
 
@@ -1213,7 +1213,7 @@ class Bursts(Minbar):
 
             _data = pd.read_csv(_file,
                                 names=['trange', 'kT', 'kT_err', 'rad', 'rad_err', 'flux_3_25', 'flux_3_25_err',
-                                       'flux', 'fluxerr', 'chisq'], sep='\s+')
+                                       'flux', 'fluxerr', 'chisq'], sep=r'\s+')
             nspec = len(_data)
             time = np.zeros(nspec)
             dt = np.zeros(nspec)
@@ -1251,7 +1251,7 @@ class Bursts(Minbar):
             _data = pd.read_csv(_file, comment='#',
                                 names=['time', 'r', 're', 'dt', 'nH', 'nH_min', 'nH_max', 'kT', 'kT_min', 'kT_max',
                                        'rad', 'rad_min', 'rad_max', 'chisq', 'rawflux', 'flux', 'flux_min', 'flux_max'],
-                                sep='\s+')
+                                sep=r'\s+')
 
             # _data = _path # for testing
             _data['fluxerr'] = 0.5 * (_data['flux_max'] - _data['flux_min'])
@@ -1657,8 +1657,8 @@ class Observations(Minbar):
             lightcurve = self.local_data & ((len(self['entry']) <= 10) | (extent <= 10.))
 
         instr = np.array([x[:2] for x in self['instr']])
-        label = {'IJ': '{\it INTEGRAL}/JEM-X', 'SW': '{\it BeppoSAX}/WFC',
-            'XP': '{\it RXTE}/PCA'}
+        label = {'IJ': r'{\it INTEGRAL}/JEM-X', 'SW': r'{\it BeppoSAX}/WFC',
+            'XP': r'{\it RXTE}/PCA'}
         colors = {'IJ': 'C0', 'SW': 'C1', 'XP': 'C2'}
 
         for _instr in set(instr):
@@ -1702,7 +1702,7 @@ class Observations(Minbar):
             self.bursts.clear()
 
         plt.xlabel('Time [MJD]')
-        plt.ylabel('Flux [3-25 keV, $10^{-9}\, \mathrm{erg\,cm^{-2}\,s^{-1}}$]')
+        plt.ylabel(r'Flux [3-25 keV, $10^{-9}\, \mathrm{erg\,cm^{-2}\,s^{-1}}$]')
         if (nburst > 0) | (len(set(instr)) > 1):
             plt.legend()
 
@@ -1903,7 +1903,7 @@ class Observation:
         :return: plot object
         """
 
-        ylabel = 'Rate (count s$^{-1}$ cm$^{-2}$)'
+        ylabel = r'Rate (count s$^{-1}$ cm$^{-2}$)'
         # def_style = { 'fmt': '.' }
         def_style = { 'color': 'C0' }
 
@@ -1915,7 +1915,7 @@ class Observation:
 
         if self.time is None:
             logger.info('Showing schematic plot for flux')
-            ylabel = 'Flux (3-25 keV, $10^{-9}\ \rm{erg\,cm^{-2}\,s^{-1}$)'
+            ylabel = r'Flux (3-25 keV, $10^{-9}\ \rm{erg\,cm^{-2}\,s^{-1}$)'
             plt.errorbar(0.5*(self.tstart+self.tstop), self.flux,
                 xerr=0.5*(self.tstop-self.tstart), yerr=self.e_flux, **kwargs)
             rate_max = (self.flux+self.e_flux).value
@@ -1950,7 +1950,7 @@ class Observation:
             if type(title) == str:
                 plt.title(title)
             else:
-                plt.title("{} {{\\it {}}} obs \#{}".format(self.name, self.instr.name, self.obsid))
+                plt.title(r"{} {{\\it {}}} obs \#{}".format(self.name, self.instr.name, self.obsid))
 
         if hasattr(self, 'bursts') & show_bursts:
             # also plot the bursts
@@ -2337,7 +2337,7 @@ class Sources:
             # Create the pandas DataFrame from the FITS data, and strip trailing whitespace
             self.table = pd.DataFrame.from_records(_f[1].data,
                                                    exclude=['SPA_PARS','SPE_PARS','VAR_PARS','E_MIN','E_MAX','FLUX','FLUX_ERR']
-                                                   ).applymap(lambda x: x.strip() if isinstance(x, str) else x)
+                                                   ).map(lambda x: x.strip() if isinstance(x, str) else x)
             _f.close()
 
             # Extract the version information

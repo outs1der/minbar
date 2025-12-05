@@ -1,0 +1,9 @@
+name: minbar
+dependencies:
+- python=3.14
+- pip
+- numpy
+- astropy
+- pandas
+- pip:
+  - requests
