@@ -95,11 +95,11 @@ def burstplot(_bdata, param='flux', show=True, **kwargs):
     # plot_param
     # Might need to set up some custom labels for the different
     # conventions of the SAX and RXTE data
-    ylabel = {'r': 'Count rate [s$^{-1}$]',
-              'flux': 'Flux [$10^{-9} \mathrm{erg\,cm^{-2}\,s^{-1}}$]',
-              'kT': 'kT [keV]',
-              'rad': 'Blackbody normalisation\n[$(R_{\mathrm{km}}/d_{10\ \mathrm{kpc}})^2$]',
-              'chisq': 'Fit $\chi^2/n_{\mathrm{DOF}}$'}
+    ylabel = {'r': r'Count rate [s$^{-1}$]',
+              'flux': r'Flux [$10^{-9} \mathrm{erg\,cm^{-2}\,s^{-1}}$]',
+              'kT': r'kT [keV]',
+              'rad': r'Blackbody normalisation\n[$(R_{\mathrm{km}}/d_{10\ \mathrm{kpc}})^2$]',
+              'chisq': r'Fit $\chi^2/n_{\mathrm{DOF}}$'}
     color = {'r': 'k', 'flux': 'k', 'kT': 'r', 'rad': 'b', 'chisq': 'g'}
 
     if type(_bdata) != pd.DataFrame:

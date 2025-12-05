@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.34.0dev'
+__version__ = '1.34.1dev'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -443,7 +443,7 @@ class Minbar(IDLDatabase):
             table = '_'.join(table.split('-'))
 
             self.con = connect_db()
-            table = pd.read_sql_query('SELECT * FROM {}'.format(table), self.con).applymap(lambda x: x.strip() if isinstance(x, str) else x)
+            table = pd.read_sql_query('SELECT * FROM {}'.format(table), self.con).map(lambda x: x.strip() if isinstance(x, str) else x)
             self.records = Table.from_pandas(table)
             self.con.close()
             self.header = None
@@ -2292,7 +2292,7 @@ class Sources:
         if (source == 'db') & (os.path.exists('/'.join((MINBAR_DR2,'minbar.db')))):
             # here we can load in the data from the database
             self.con = connect_db()
-            self.table = pd.read_sql_query('SELECT * FROM sources', self.con).applymap(lambda x: x.strip() if isinstance(x, str) else x)
+            self.table = pd.read_sql_query('SELECT * FROM sources', self.con).map(lambda x: x.strip() if isinstance(x, str) else x)
             self.con.close()
             self.header = None
             self.field_names = {i.lower(): i for i in self.table.columns}

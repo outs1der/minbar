@@ -104,7 +104,7 @@ def scrape_jeanslist():
                 host.append(x[1].strip())
             else:
                 host.append('')
-            y = re.split("[=\/]", x[0])
+            y = re.split(r"[=\/]", x[0])
             if len(y) > 1:
                 name2.append(y[1].strip())
                 name.append(y[0].strip())
@@ -554,7 +554,7 @@ def get_obs_info(test_dir, target_dir, debug=False):
 
             # perform cone search for source in MINBAR.Source, make sure of an unambiguous ID
             s = minbar.Sources()
-            c = SkyCoord(ra=s['ra_obj']*u.degree, dec=s['dec_obj']*u.degree, frame='icrs')
+            c = SkyCoord(ra=s['ra_obj'].values*u.degree, dec=s['dec_obj'].values*u.degree, frame='icrs')
             t = SkyCoord(ra=_ra_obj*u.degree, dec=_dec_obj*u.degree, frame='icrs')
             sep = t.separation(c)
 
