@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.35.0dev'
+__version__ = '1.36.0dev'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -1778,7 +1778,7 @@ class Observation:
     """
 
 
-    def __init__(self, obs_entry=None, instr=None, name=None, obsid=None, path=None):
+    def __init__(self, obs_entry=None, instr=None, name=None, obsid=None, path=None, analyse=True):
         """
         Create an observation instance, either from a MINBAR obs entry, or by-hand
         Ideally this object should make available every parameter in the MINBAR observation table
@@ -1807,6 +1807,7 @@ class Observation:
         :param source: source name
         :param obsid: observation ID
         :param path: absolute path to observation directory; overrides the default provided by the Instrument class
+        :param analyse: set to false to skip any automated analysis that might otherwise be performed
 
         :returns: None
         """
@@ -1864,7 +1865,18 @@ class Observation:
         # Custom paths here
 
         if path is not None:
-            self.path = '/'.join((path, obsid))
+            # think it's more likely that you'd just specify the whole path here
+            # self.path = '/'.join((path, obsid))
+            if os.path.isdir(path):
+                self.path = path
+            else:
+                logger.error('path does not exist')
+                return
+        elif hasattr(instr,'source_path'):
+            # nothing to do here as we get the path from the instrument via get_path
+            pass
+        else:
+            logger.warning('no path supplied and can''t get path from instrument')
 
         # Define parameters for the lightcurve; later this might be a class
         # The lightcurve might also not be available, so don't force it to be read in now
@@ -1917,16 +1929,35 @@ class Observation:
                 logger.warning('no filter file found, may need to run level-2 analysis')
                 return
 
-            if self.level == 0:
-                self.level = self.verify(warnings=False)
+        # finally, set the analysis level
+        if self.level == 0:
+            self.level = self.verify(warnings=False)
+
+        # we could do some analysis steps here, for example finding bursts, automatically
+        if (self.level == 2) & analyse:
+            # want to set nburst and bursts, the meta equivalent for the MINBAR events
+            self.get_lc()
+            _t0 = min(self.mjd.value)
+            _times = findburst(self.mjd.value-_t0, self.rate.value, self.error.value, tunit='d')+_t0
+            self.level = 3
+            self.nburst = len(_times)
+            logger.info('burst search with findburst returned {} candidates'.format(self.nburst))
+            if self.nburst > 0:
+                self.bursts = Table([[self.name]*self.nburst,[self.obsid]*self.nburst,
+                                     [self.instr.label]*self.nburst, _times],
+                    names=('name','obsid','instr','time'), dtype=('U23','U13','U3','f8'),
+                    meta={'name': 'output from findburst'})
+
 
     def __str__(self):
         """
         Return a nice string.
         """
 
-        output = "MINBAR observation of {}\nInstrument: {}\nObsID: {}".format(
-            self.name, self.instr.name, self.obsid)
+        output = "Observation of {}{}\nInstrument: {}\nObsID: {}".format(
+            self.name,
+            ' (MINBAR {}#{})'.format('DR1 ' if self.entry <= 277779 else '',self.entry) if self.entry is not None else '',
+            self.instr.name, self.obsid)
         if hasattr(self,'tstart') & hasattr(self,'tstop'):
             output += "\nTime range: MJD {}-{}".format(self.tstart.value, self.tstop)
         _path = self.get_path()
@@ -1965,6 +1996,9 @@ class Observation:
         """
 
         ylabel = r'Rate (count s$^{-1}$ cm$^{-2}$)'
+        if hasattr(self, 'lc_unit'): # set in get_lc
+            if self.lc_unit == 'count':
+                ylabel = r'Raw counts (cm$^{-2}$)'
         # def_style = { 'fmt': '.' }
         def_style = { 'color': 'C0' }
 
@@ -2011,7 +2045,7 @@ class Observation:
             if type(title) == str:
                 plt.title(title)
             else:
-                plt.title(r"{} {{\\it {}}} obs \#{}".format(self.name, self.instr.name, self.obsid))
+                plt.title(r"{} {{\it {}}} obs \#{}".format(self.name, self.instr.name, self.obsid))
 
         if hasattr(self, 'bursts') & show_bursts:
             # also plot the bursts
@@ -2129,7 +2163,11 @@ class Observation:
 
             timesys = header['TIMESYS']
             timeunit = header['TIMEUNIT'].lower()
-            timepixr = header['TIMEPIXR']
+            if 'TIMEPIXR' in header:
+                timepixr = header['TIMEPIXR']
+            else:
+                logger.warning('no TIMEPIXR in header, assuming 0.0 (start of bin)')
+                timepixr = 0.0
             if 'TIMEZERO' in header:
                 timezero = header['TIMEZERO']*u.Unit(timeunit)
             elif (('TIMEZERI' in header) & ('TIMEZERF' in header)):
@@ -2139,8 +2177,28 @@ class Observation:
                 timezero = 0.0*u.Unit(timeunit)
             time = lc['TIME']*u.Unit(timeunit)
 
-            rate = lc['RATE']/u.s/effarea
-            error = lc['ERROR']/u.s/effarea
+            self.lc_unit = 'count'
+            if hasattr(lc, 'RATE'):
+                rate = lc['RATE']/u.s/effarea
+                error = lc['ERROR']/u.s/effarea
+                self.lc_unit = 'rate'
+            elif hasattr(lc, 'COUNTS'):
+                # if we don't have a RATE, try to calculate it here
+                rate, error = lc['COUNTS']/effarea, lc['ERROR']/effarea
+                if hasattr(lc, 'EXPOSURE'):
+                    nz = lc['EXPOSURE'] > 0.0
+                    if (max(rate[~nz]) > 0.0) | (max(error[~nz]) > 0.0):
+                        logger.warning('COUNTS is nonzero for one or more zero EXPOSUREs, skipping conversion to rate')
+                    else:
+                        rate /= u.s
+                        error/= u.s
+                        rate[nz] /= lc['EXPOSURE'][nz]
+                        error[nz] /= lc['EXPOSURE'][nz]
+                        self.lc_unit='rate'
+                else:
+                    logger.warning('no RATE/EXPOSURE keywords found, falling back to counts')
+                    rate = lc['COUNTS']/effarea
+                    error = lc['ERROR']/effarea
 
             # print (header['INSTRUME'])
             if instrument == 'PCA':
@@ -2870,6 +2928,7 @@ class Instrument:
     """
 
     def __init__(self, name, sat=None, camera=None, path=None, label=None,
+                 source_source='db',
                  lightcurve=['lc1_3-25keV_1.0s.fits','lc2_3-25keV_1.0s.fits'],
                  source_name=None,
                  spectrum=None,
@@ -2889,6 +2948,7 @@ class Instrument:
         :param camera: qualifier for the instrument name; e.g. camera 1 or 2 for WFC or JEM-X. TODO decide how to deal with this for the PCA
         :param path: local path specifier for observations from this instrument
         :param label: two-character label code for this instrument
+        :param source_source: data source for the MINBAR sources, defaults to 'db' for the most up-to-date list
         :param lightcurve: filename for the lightcurves
         :param source_name: list of source names for this instrument, defaulting to the names from :class:`minbar.Sources`
         :param spectrum: filename for the spectra
@@ -2929,7 +2989,7 @@ class Instrument:
             # sys.exit(1)
             # logger.error('need a valid path for the data files')
             # avoid printing the warning, will be annoying for multiple instruments
-            # logger.warning('MINBAR_ROOT path for raw data does not exist')
+            logger.warning('MINBAR_ROOT subdirectory for raw data does not exist; specify via path parameter')
             # return None
             self.path = None
 
@@ -2937,7 +2997,7 @@ class Instrument:
         # (as a chararray) from there; otherwise you can pass it as a parameter
 
         if source_name is None:
-            self.source = Sources()
+            self.source = Sources(source_source)
             self.source_name = self.source['name'].values
         else:
             self.source_name = source_name
@@ -2947,7 +3007,7 @@ class Instrument:
         # (without some judicious softlinks)
 
         # print (type(self.source_name), type(self.source_name[0]), self.source_name[0])
-        self.source_path = np.char.replace(self.source_name.astype(str), " ", "")
+        self.source_path = np.char.replace(list(self.source_name.astype(str)), " ", "")
         if self.label == 'XP':
             # for RXTE/PCA, most sources just omit the prefix (but not the GX sources)
             # self.source_path = np.array([x.split()[1] for x in self.source_name])

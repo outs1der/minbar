@@ -685,7 +685,7 @@ def findburst(_time, _rate, _error=None, tunit=None,
     # time at which the cross-correlation is maximum, less the window
     # offset and the rise time
 
-    t_cand = [time[x[0]+np.argmax(c[x[0]:x[1]])] for x in t_cand_ind]+fwin[0]-rise/sd
+    t_cand = [time[x[0]+np.argmax(c[x[0]:x[1]])] for x in t_cand_ind if x[1] > x[0]]+fwin[0]-rise/sd
     if not fit:
         # return time[t_cand_ind[:,0]]-fwin[0]
         return t_cand
