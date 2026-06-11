@@ -1590,7 +1590,7 @@ def binplot(bins, rate, rate_err, panel=None, pbins=None,
 
     # plt.xlabel('Accretion rate $\dot{m}/\dot{m}_{\rm Edd}$')
     if noxlab == False:
-        plt.xlabel('Accretion rate $\dot{m}/\dot{m}_\mathrm{Edd}$')
+        plt.xlabel(r'Accretion rate $\dot{m}/\dot{m}_\mathrm{Edd}$')
 
     if log:
         plt.xscale('log')
