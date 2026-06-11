@@ -1,0 +1,127 @@
+# File refs.txt
+#
+# This file lists the ADS bibliographic codes for the numbered references
+# in the MINBAR DR1 burst table
+#
+# You can access the papers by visiting the link 
+#   https://ui.adsabs.harvard.edu/abs/[bibliographic code]
+#
+# See also https://github.com/outs1der/minbar for an automated way to do
+# this
+#
+# Columns:
+ref, "code (internal)", "ADS"
+1, kuul03a, 2010PhRvL.105p1102H
+2, zand14a, 2014A%26A...562A..16I
+3, zand17b, 2017A%26A...606A.130I
+4, kuul10, 2010A%26A...514A..65K
+5, zand10a, 2010A%26A...520A..81I
+6, zand14b, 2014A%26A...568A..69I
+7, chelov05, 2005AstL...31..681C
+8, aranzana16, 2016A%26A...586A.142A
+9, zand05a, 2005A%26A...441..675I
+10, corn02b, 2002A%26A...392..885C
+11, jon01, 2001ApJ...553..335J
+12, zand11a, 2011A%26A...525A.111I
+13, zand08a, 2008A%26A...485..183I
+14, piro97, 1997IAUC.6538....2P
+15, bhatt07a, 2007MNRAS.377..198B
+16, zand03b, 2003A%26A...411L.487I
+17, barnard01, 2001A%26A...380..494B
+18, linares10, 2010ApJ...719L..84L
+19, corn03a, 2003A%26A...405.1033C
+20, stroh98b, 1998ApJ...498L.135S
+21, mill99, 1978ApJ...220..291L
+22, mill00, 2000ApJ...531..458M
+23, gil02, 2002ApJ...568..279G
+24, muno02b, 2002ApJ...568L..35M
+25, gal06a, 2006ApJ...639.1033G
+26, lyu16, 2016MNRAS.463.2358L
+27, bhatt06a, 2006ApJ...636L.121B
+28, jonk04, 2004MNRAS.354..666J
+29, homan07, 2007ATel.1144....1H
+30, wij01, 1997ApJ...481L..97V
+31, wij01c, 2002ApJ...566.1060W
+32, mss99, 1999ApJ...512L.125M
+33, zand05b, 2005A%26A...440..287I
+34, ford98, 1996ApJ...470..706A
+35, assa01, 2001BASI...29..361A
+36, cocchi98, 1998ApJ...508L.163C
+37, cocchi99b, 1999IAUC.7247....3C
+38, kuul09c, 2009A%26A...503..889K
+39, kaptein00, 2000A%26A...358L..71K
+40, marshall99b, 1999IAUC.7133....3M
+41, chenevez07, 2007A%26A...469L..27C
+42, brandt06a, 2006ATel..778....1B
+43, mgl00, 2000A%26A...357L..41M
+44, suleimanov11b, 2011ApJ...742..122S
+45, franco01, 2001ApJ...554..340F
+46, vs01, 2001ApJ...551..907V
+47, gal03b, 2003ApJ...590..999G
+48, stroh97b, 1997ApJ...487L..77S
+49, stroh98, 1998ApJ...498L.135S
+50, stroh96, 1996ApJ...469L...9S
+51, falanga06, 2006A%26A...458...21F
+52, gbm3cat, 2016ApJ...826..228J
+53, fox01, 2001MNRAS.321..776F
+54, guerr99, 1999MNRAS.307..179G
+55, muno00, 2009MNRAS.394L.136M
+56, bazz97, 1997IAUC.6597....1B
+57, brandt05, 2005ATel..622....1B
+58, zand02, 2002A%26A...389L..43I
+59, stroh97, 1997ApJ...487L..77S
+60, cocchi99a, 1999A%26A...346L..45C
+61, chakraborty12, 2012MNRAS.422.2351C
+62, werner04, 2004A%26A...416..311W
+63, zand98b, 1998IAUC.6846....2I
+64, brandt06b, 2006ATel..970....1B
+65, chenevez11b, 2016ApJ...818..135C
+66, hartog03, 2003A%26A...400..633D
+67, kuul00, 2000A%26A...356L..45K
+68, chenevez06, 2006A%26A...449L...5C
+69, zand99b, 1999A%26A...345..100I
+70, ferrigno11, 2011ATel.3560....1F
+71, jonk00b, 2000ApJ...531..453J
+72, gal04a, 2004AIPC..714..266G
+73, nat99, 1999ApJ...523L..45N
+74, bazz97b, 1997IAUC.6597....1B
+75, kaaret02, 2002ApJ...575.1018K
+76, zand03, 2003A%26A...411L.487I
+77, zand03a, 2003A%26A...409..659I
+78, li18b, 2018ApJ...866...53L
+79, cocchi99c, 1999IAUC.7307....2C
+80, zand99c, 1999NuPhS..69..228I
+81, chelov07a, 2007AstL...33..807C
+82, chelov07b, 2007ATel.1094....1C
+83, chenevez12a, 2012ATel.4050....1C
+84, corn07b, 2007MNRAS.380.1637C
+85, muller98b, 1998IAUC.6867....2M
+86, zand98c, 1998A%26A...331L..25I
+87, zand01, 2001ApJ...563L..41I
+88, gal06c, 2006ApJ...652..559G
+89, chak03a, 2003Natur.424...42C
+90, bhatt06f, 2006ApJ...642L.161B
+91, bhatt06d, 2007ApJ...656..414B
+92, delmonte08b, 2008ATel.1732....1D
+93, nat00b, 2000ApJ...536..891N
+94, ubert98, 1998IAUC.6838....1U
+95, fiocchi09, 2009ApJ...693..333F
+96, stroh03a, 2003ApJ...596L..67S
+97, watts05, 2005ApJ...634..547W
+98, cocchi00, 2000A%26A...357..527C
+99, kuul02a, 2002A%26A...382..947K
+100, zand04a, 2004A%26A...426..257I
+101, cocchi01c, 2001AdSpR..28..375C
+102, clock99, 1999ApJ...514L..27U
+103, ubert97, 1997IAUC.6611....1U
+104, gal03d, 2004ApJ...601..466G
+105, kong00, 2000MNRAS.311..405K
+106, zand98, 1998IAUC.6997....3I
+107, kajava17a, 2017MNRAS.464L...6K
+108, zhang98, 1998ApJ...494L..71Z
+109, 1916burst, 2000HEAD...32.2212G
+110, tomsick99, 1999ApJ...521..341T
+111, ts98, 1998IAUC.6958....2T
+112, smale01, 2001ApJ...562..957S
+113, smale98b, 1998ApJ...498L.141S
+114, ts02, 2002ApJ...570L..25T
