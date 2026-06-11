@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.33.0'
+__version__ = '1.34.0'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -39,6 +39,7 @@ from astropy.time import Time
 from astropy.table import Table
 from datetime import datetime
 import logging
+import webbrowser
 import sys
 
 import matplotlib.pyplot as plt
@@ -1108,6 +1109,10 @@ class Bursts(Minbar):
         # Among other things, this call sets the selection, order, order_field and ind arrays
         self.clear()
 
+        # read in the reference data
+
+        self.refdata = ascii.read(self.get_default_path('refs.txt'))
+
 
     def get_burst_data(self, id):
         """
@@ -1544,6 +1549,36 @@ class Bursts(Minbar):
             self.exclude('4U 1746-37') # Possibly 2 sources
             self.exclude('EXO 1745-248') # Possibly Type II
 
+    def ref_lookup(self, id=None):
+        """
+        Provide links to references for a group of bursts or a single
+        event. If there is only one reference it will open the link in the
+        system browser
+
+        :param id: MINBAR entry of burst to lookup; if absent, will return the references for all the selected bursts
+
+        :return: URL string(s) for references
+        """
+
+        if id is not None:
+            refs = self[id]['refs']
+        else:
+            refs = ','.join( set(','.join(self['refs'].value).split(',')))
+
+        if refs == '-':
+            logger.warning('no references for the selected burst(s)')
+
+        # print (refs)
+        urls = []
+        for ref_no in refs.split(','):
+            if ref_no != '-':
+                urls.append('https://ui.adsabs.harvard.edu/abs/{}'.format(
+                    self.refdata[self.refdata['ref']==int(ref_no)]['ADS'].value[0]))
+
+        if len(urls) == 1:
+            webbrowser.open_new(urls[0])
+
+        return urls
 
 class Observations(Minbar):
     """
@@ -1661,6 +1696,16 @@ class Observations(Minbar):
             'XP': r'{\it RXTE}/PCA'}
         colors = {'IJ': 'C0', 'SW': 'C1', 'XP': 'C2'}
 
+        # here we need to manage the passed keyword arguments. Some will
+        # be passed on to plt, others should not
+
+        if 'xlim' in kwargs.keys():
+            plt.xlim(kwargs['xlim'])
+            kwargs.pop('xlim')
+        if 'ylim' in kwargs.keys():
+            plt.ylim(kwargs['ylim'])
+            kwargs.pop('ylim')
+
         for _instr in set(instr):
             _s = instr == _instr
             if lightcurve:
@@ -1669,8 +1714,8 @@ class Observations(Minbar):
                 _label = label[_instr]
                 for _id in self['entry'][_s]:
                     _obs = Observation(self[_id])
-                    _obs.plot(fig, show=False, show_bursts=False,
-                        label=_label, color=colors[_instr])
+                    _obs.plot(fig, show=False, show_bursts=False, 
+                        label=_label, color=colors[_instr], **kwargs)
                     # have to calculate the yrange progressively here with
                     # each lightcurve
                     yrange = (min([yrange[0], min(_obs.rate.value)]),
@@ -1681,7 +1726,7 @@ class Observations(Minbar):
                 plt.errorbar(0.5*(self['tstart'][_s]+self['tstop'][_s]),
                     self['flux'][_s], yerr = self['e_flux'][_s],
                     xerr = 0.5*(self['tstop'][_s]-self['tstart'][_s]),
-                    fmt='.', label=label[_instr], color=colors[_instr])
+                    fmt='.', label=label[_instr], color=colors[_instr], **kwargs)
 
         # need a reverse lookup for the bursts; this is pretty slow, but I
         # can't think of a better way to do it
