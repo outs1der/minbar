@@ -165,9 +165,12 @@ def match_name(name, name2, name3=None, comments=None):
         for i, comment in enumerate(comments):
             # search as lower case to match "Rapid Burster" with "Rapid burster" (groan)
             if comment is not None:
-                _pos = comment.lower().find(name.lower())
-                if _pos >= 0:
-                    _i.append(i)
+                try:
+                    _pos = comment.lower().find(name.lower())
+                    if _pos >= 0:
+                        _i.append(i)
+                except:
+                    minbar.logger.warning('possible non-str comment, entry {}, "{}"'.format(i, comment))
         # print (name, _i)
         if (len(_i) > 1):
             if _i[0] != 39:

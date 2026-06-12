@@ -489,7 +489,7 @@ def burst_template_flat(x, base, start, rise, peak_rate, peak_dur, edt):
     return f + base  # , pder
 
 
-def findburst(_time, _rate, _error=None, tunit=None,
+def findburst(_time, _rate, _error=None, tunit=None, detrend=True,
     rise=None, edt=20., refine=False, fit=False, fit_func=burst_template_flat,
     # sig=sig, param=param, error=sigma, resid=resid,
     plot=False, # xrange=xrange,
@@ -506,6 +506,7 @@ def findburst(_time, _rate, _error=None, tunit=None,
     :param _rate: array with burst rate [counts/sec, or counts/sec/cm^2]
     :param _error: array with error on burst rate
     :param tunit: string giving time units, 's' or 'd'
+    :param detrend: boolean, set to True to detrend observation data
     :param rise: (optional) template burst rise time [sec]
     :param edt: (optional) template burst exponentional decay timescale [sec]
     :param refine: boolean, set to True to 'refine' the burst time based on a fit (not yet implemented)
@@ -557,8 +558,9 @@ def findburst(_time, _rate, _error=None, tunit=None,
 
 # Make copies of the input arrays to avoid unintentionally modifying them
 
-    time = _time
-    rate = _rate
+    t0 = min(_time)
+    time = _time.copy()-t0
+    rate = _rate.copy()
     n = len(time)
     dt = dt_nonzero(time)         # Nominal dt
 
@@ -580,7 +582,17 @@ def findburst(_time, _rate, _error=None, tunit=None,
         rate = rate[fin]
         error = error[fin]
 
-# Try to establish what the time unit here is, and set the scaling factors
+    # detrend here if required
+    # TODO would really like to keep this with the observation object
+    if detrend:
+        _poly = 1
+        if type(detrend) is int:
+            _poly = detrend
+        nz = rate > 0.0
+        pp1 = np.polynomial.Polynomial.fit(time[nz], rate[nz], deg=_poly)
+        rate -= pp1(time)
+
+# Try to establish what the time unit here is, and setpp1 = np.polynomial.Polynomial.fit(t, x, deg=1) the scaling factors
 # and timescales appropriately
 
 #  sd=864d2 & md=144d1
@@ -625,13 +637,13 @@ def findburst(_time, _rate, _error=None, tunit=None,
 #  t0=0.5*(max(time)+min(time)) ; Trial burst is in the middle of the segment
     # t0=time[int(n/2)]
     # trial, pder = burst_template(time,[m,t0,rise/sd,p,edt/sd])
-    t0 = time[0]+pb
+    _t0 = time[0]+pb
     # trial, pder = burst_template(time[fwin_ind],[m,t0,rise/sd,p,edt/sd])
     # set peak duration to the same value as the rise
-    trial = burst_template_flat(time[fwin_ind], m, t0, rise/sd, p, rise/sd, edt/sd)
+    trial = burst_template_flat(time[fwin_ind], m, _t0, rise/sd, p, rise/sd, edt/sd)
     # we store the template values as the guess for curve_fit
     # TODO modify these guesses etc. based on the specific form of the fit function
-    p0 = [m, t0, rise/sd, p, rise/sd, edt/sd]
+    p0 = [m, _t0, rise/sd, p, rise/sd, edt/sd]
     if dbg & (not fit):
         plt.plot(time[fwin_ind],trial)
 
@@ -688,7 +700,7 @@ def findburst(_time, _rate, _error=None, tunit=None,
     t_cand = [time[x[0]+np.argmax(c[x[0]:x[1]])] for x in t_cand_ind if x[1] > x[0]]+fwin[0]-rise/sd
     if not fit:
         # return time[t_cand_ind[:,0]]-fwin[0]
-        return t_cand
+        return [x+t0 for x in t_cand]
     else:
 
         # Now set up the result arrays, based on the number of contiguous regions
@@ -821,7 +833,7 @@ def findburst(_time, _rate, _error=None, tunit=None,
 
             if (_s not in (1,2,3,4)) or (np.any(~np.isfinite(_sigma))) or (_param[4] < 0.0):
                 _param=np.zeros(6)
-                _param[1]=t_cand[ncand-1]
+                _param[1]=t_cand[ncand-1]+t0
                 _sigma=np.zeros(6)
 
             # Assemble parameter, result list
@@ -847,7 +859,7 @@ def findburst(_time, _rate, _error=None, tunit=None,
 
 # if dbg then stop
 
-    return t_cand, param, sigma
+    return [x+t0 for x in t_cand], param, sigma
 
 
 def generate_bins(x_b, x_o, nperbin=10, log=True, x_lim=None, x_add=None):

@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.36.1dev'
+__version__ = '1.37.0dev'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -204,7 +204,9 @@ DISC_INSTR = {'WFC': 'BeppoSAX Wide Field Camera (WFC)',
               'UHU': 'Uhuru',
               'OPT': 'optical bursts', # 4U 1254-69
               # new post-DR1
-              'CHA': 'Chandra X-ray Observatory' }
+              'CHA': 'Chandra X-ray Observatory',
+              'XMM': 'XMM-Newton',
+              'EPR': 'Einstein Probe'}
 
 # List of ultra compacts based on In 't Zand (2007)
 # Includes all candidates.  Updated as of MINBAR source list v2.6
@@ -1937,16 +1939,18 @@ class Observation:
         if (self.level == 2) & analyse:
             # want to set nburst and bursts, the meta equivalent for the MINBAR events
             self.get_lc()
-            _t0 = min(self.mjd.value)
-            _times = findburst(self.mjd.value-_t0, self.rate.value, self.error.value, tunit='d')+_t0
+            self.tstart, self.tstop = min(self.mjd), max(self.mjd)
+            _times = findburst(self.mjd.value, self.rate.value, self.error.value, tunit='d')
             self.level = 3
             self.nburst = len(_times)
             logger.info('burst search with findburst returned {} candidates'.format(self.nburst))
             if self.nburst > 0:
+                logger.warning('instrument label doesn''t yet incorporate information about functioning camera(s)')
                 self.bursts = Table([[self.name]*self.nburst,[self.obsid]*self.nburst,
-                                     [self.instr.label]*self.nburst, _times],
-                    names=('name','obsid','instr','time'), dtype=('U23','U13','U3','f8'),
-                    meta={'name': 'output from findburst'})
+                                     [self.instr.label]*self.nburst, _times, [False]*self.nburst],
+                    names=('name','obsid','instr','time','confirmed'), dtype=('S23','S15','S3','f8','b1'),
+                    meta={'name': 'output from findburst, pyminbar v{}, {}'.format(VERSION, DATE)})
+                self.bursts.info.format = '11.5f'
 
 
     def __str__(self):
@@ -1967,7 +1971,7 @@ class Observation:
         return output
 
 
-    def plot(self, figure=None, show=True, show_bursts=True, sym_burst='^r',
+    def plot(self, figure=None, show=True, show_bursts=True, sym_burst='|r',
             title=True, **kwargs):
         """
         Plot the observation lightcurve, reading it in first if need be.
@@ -1985,11 +1989,11 @@ class Observation:
           to be plotted on the same axis (for example)
         :param show: display the figure immediately or not (latter case for
           multiple observations to be plotted together)
-	:param show_bursts: set to True (default) to show any bursts
+        :param show_bursts: set to True (default) to show any bursts
           present in the observation
         :param sym_bursts: symbol used for bursts
-	:param title: set to None to omit the title, or a string for any
-	  specific title, or True for a standard informative title giving
+	    :param title: set to None to omit the title, or a string for any
+	      specific title, or True for a standard informative title giving
           source, instrument and observation ID
 
         :return: plot object
@@ -2049,8 +2053,20 @@ class Observation:
 
         if hasattr(self, 'bursts') & show_bursts:
             # also plot the bursts
-            plt.plot(self.bursts['time'],
-                rate_max+0.05*rate_range * np.full(len(self.bursts), 1), sym_burst)
+            _rate_bursts = rate_max + 0.05 * rate_range * np.full(self.nburst, 1)
+            if 'confirmed' in self.bursts.columns:
+                confirmed = self.bursts['confirmed']
+                plt.plot(self.bursts['time'][~confirmed], _rate_bursts[~confirmed], 'vr', label='candidate')
+                _labels = np.array(['.{}'.format(i) for i in range(self.nburst)])
+                for _label, _x, _y in zip(_labels[~confirmed], self.bursts['time'][~confirmed].value, _rate_bursts[~confirmed].value):
+                    plt.annotate(_label, xy=(_x, _y), c='r')#, xytext=(2, 2))
+            else:
+                confirmed = np.full(len(self.bursts), True)
+            plt.plot(self.bursts['time'][confirmed],
+                rate_max+0.05*rate_range*np.full(sum(confirmed), 1), sym_burst, label='confirmed')
+            if np.any(~confirmed):
+                plt.legend()
+
         if show:
             plt.show()
 
