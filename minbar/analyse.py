@@ -10,6 +10,13 @@ import minbar
 import astropy.units as u
 import matplotlib.pyplot as plt
 
+HAS_XSPEC = False
+try:
+    from xspec import *
+    HAS_XSPEC = True
+except:
+    pass
+
 def idlwhere(bool):
     """
     Routine to replace the IDL where routine, which nicely returns the number of elements, and the complement
@@ -1776,6 +1783,146 @@ Columns:
 
     minbar.logger.info('...reduce step complete')
     return True # assuming no errors
+
+
+def bspectra_fit(file, path=None, nH=None, limits=(2.5, 20), steppar_grid=50, errfac=2., del_chi=2.28):
+    """
+    Routine to fit a blackbody model to a single spectrum, and return the parameter
+    centroid and limits, and the flux centroid and limits.
+
+    Some of the parameters of interest are not yet available to be captured, for example
+    the count rate and uncertainty
+
+    :param file: spectral file name to read in, or .xcm file to load the spectral data
+    :param path: path to spectral/xcm file
+    :param nH: neutral absorption to adopt (and freeze)
+    :param limits: energy limits between which the fit will be performed (keV)
+    :param steppar_grid: size of the steppar grid to run (each of 2 dimensions)
+    :param errfac: factor to inflate the errors on kT, norm, to cover in the grid
+    :param del_chi: delta-chi^2 for parameters, normally 1-sigma for 2 params
+
+    :returns: tuple with count, count_err, best kT, (lower, upper error), best norm, (lower, upper error), min-chi^2, nDOF, raw (band-limited) flux, (lower, upper error), num. steppar grid points within target chi^2 contour
+    """
+
+    # don't currently have a way to determine these easily
+    count, count_err = 0.0, 0.0
+
+    def bbodyrad_flux(norm, kt):
+        """
+        Compute the bolometric flux from XSPEC bbodyrad parameters
+
+        :param norm: (float) bbodyrad norm in units of (R_km / D_10)^2
+        :param kt: (float) bbodyrad temperature in units of keV
+
+        :returns: bolometric flux (float) in units of erg / s / cm^2
+        """
+        return 1.079777e-11 * norm * kt ** 4
+
+    # steppar commands will hang, unless you run
+    Xset.chatter = 0
+    AllData.clear()
+    AllModels.clear()
+
+    if path is None:
+        # check for integrated path-and-file here
+        path, file = os.path.split(file)
+    path_and_file = '/'.join((path, file))
+
+    if not os.path.isfile(path_and_file):
+        minbar.logger.error('file {} not found'.format(path_and_file))
+        return
+
+    fileonly, ext = os.path.splitext(file)
+    _saved_dir = os.getcwd()
+    if ext == '.pha':
+        # PHA file supplied, need to define model
+        bbody = Model("tbabs * bbodyrad", \
+                      setPars={1: nH or 1.0, 2: 1.0, 3: 100})
+
+        if nH is None:
+            bbody(1).frozen = False
+        else:
+            bbody(1).frozen = True
+
+        # Naming Free Parameters
+        bbrad_nH = bbody(1)
+        bbrad_kT = bbody(2)
+        bbrad_norm = bbody(3)
+
+        s = Spectrum(path_and_file)
+        if limits is not None:
+            s.ignore("**-{:.1f} {:.1f}-**".format(limits[0], limits[1]))
+        AllData.ignore("bad")
+
+    elif ext == '.xcm':
+        # .xcm file supplied, assume data and model all read in
+        if path != '':
+            os.chdir(path)
+        Xset.restore(file)
+        # assumes a tbabs*bbodyrad model
+        bbrad_nH = AllModels(1).TBabs.nH
+        bbrad_kT = AllModels(1).bbodyrad.kT
+        bbrad_norm = AllModels(1).bbodyrad.norm
+    else:
+        minbar.logger.error("don't know what to do with file ext {}".format(ext))
+        return
+
+    Fit.perform()
+    cmin, dof = Fit.statistic, Fit.dof
+
+    Fit.error("{} {}".format(bbrad_kT.index, bbrad_norm.index))
+    kT, kT_err = bbrad_kT.values[0], bbrad_kT.error[:2]
+    norm, norm_err = bbrad_norm.values[0], bbrad_norm.error[:2]
+
+    nH, nH_err = bbrad_nH.values[0], (0, 0)
+    if not bbrad_nH.frozen:
+        Fit.error("{}".format(bbrad_nH.index))
+        nH_err = bbrad_nH.error[:2]
+
+    AllModels.calcFlux("2.5 25.")
+    raw_flux = AllData(1).flux[0]
+
+    flux = bbodyrad_flux(norm, kT)
+
+    # define limits for steppar, to (hopefully) cover the delta-chi^2 region
+
+    ta = np.max([1e-4, kT - errfac * (kT - kT_err[0])])
+    tb = np.min([200., kT + errfac * (kT_err[1] - kT)])
+    ka = np.max([1e-3, norm - errfac * (norm - norm_err[0])])
+    kb = np.min([1e24, norm + errfac * (norm_err[1] - norm)])
+
+    steppar_param = '{} {:.4f} {:.4f} {} {} {:.4f} {:.4f} {}'.format(
+        bbrad_kT.index, ta, tb, steppar_grid,
+        bbrad_norm.index, ka, kb, steppar_grid)
+    # print(type(steppar_param), 'Fit.steppar(\'{}\')'.format(steppar_param))
+
+    Fit.steppar(steppar_param)
+
+    # now to actually get the flux limits, as we do in bspectra_fit_v12.perl,
+    # we have to retrieve the grid of results AND the parameter grid values
+
+    steppar_res = Fit.stepparResults('statistic')
+    steppar_kT = Fit.stepparResults(bbrad_kT.index)
+    steppar_norm = Fit.stepparResults(bbrad_norm.index)
+
+    # calculate flux for all grid points
+
+    steppar_flux = bbodyrad_flux(np.array(steppar_norm), np.array(steppar_kT))
+
+    # now calculate the limits
+
+    # delchi^2 from bspectra_fit_v12.perl, 1-sigma for 2 parameters
+    lt1sig = np.array(steppar_res) < cmin + del_chi
+    fmin, fmax = min(steppar_flux[lt1sig]), max(steppar_flux[lt1sig])
+
+    AllData.clear()
+    AllModels.clear()
+    os.chdir(_saved_dir)
+
+# return format partially replicates save file format
+
+    #        0       1        2   3       4    5      6       7        8    9      10      11        12         13
+    return count, count_err, nH, nH_err, kT, kT_err, norm, norm_err, cmin, dof, raw_flux, flux, (fmin, fmax), sum(lt1sig)
 
 
 def analyse_burst(self, obs, burst):

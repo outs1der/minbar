@@ -111,7 +111,7 @@ def burstplot(_bdata, param='flux', show=True, **kwargs):
             minbar.logger.error('required input not pandas DataFrame and concord not available')
             return None
 
-        if type(_bdata) != cd.ObservedBurst:
+        if (type(_bdata) != cd.ObservedBurst) & (type(_bdata) != minbar.Burst):
             minbar.logger.error('required input not pandas DataFrame or concord ObservedBurst')
             return None
 

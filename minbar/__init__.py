@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.37.0dev'
+__version__ = '1.38.0dev'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -41,6 +41,15 @@ from datetime import datetime
 import logging
 import webbrowser
 import sys
+import socket
+
+HAS_CONCORD = False
+try:
+    # Required for the Burst class
+    from concord.burstclass import *
+    HAS_CONCORD = True
+except:
+    pass
 
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
@@ -52,6 +61,7 @@ kpc = u.kpc.to('cm')*u.cm # cm
 # Record the version and current date for analysis timestamps
 
 VERSION = __version__
+HOST = socket.gethostname()
 DATE = datetime.now()
 
 # Local paths for MINBAR data; you need to update this when installing
@@ -74,6 +84,7 @@ MINBAR_INSTR_LABEL = {'PCA': 'XP', 'WFC': 'SW', 'JEM-X': 'IJ'}
 MINBAR_INSTR_PATH = {'XP': 'xte', 'SW': 'wfc', 'IJ': 'jemx',
                      'PCA': 'xte', 'WFC': 'wfc', 'JEM-X': 'jemx',
                      b'XP': 'xte', b'SW': 'wfc', b'IJ': 'jemx'}
+MINBAR_ANALYSIS_PATH = 'minbar'
 
 # derived effective areas used to renormalise PCA and JEM-X lightcurves;
 # see the MINBAR paper (Galloway et al. 2020), Table 4
@@ -85,6 +96,7 @@ JEMX_EFFAREA_BURSTS = 100*u.cm**2
 # Units for selected atributes in the MINBAR tables
 # This is redundant for the MRT tables as those have their own units
 
+MINBAR_BAND = 3., 25. # keV
 FLUX_U = 1e-9*u.erg/u.cm**2/u.s
 CFLUX_U = u.ct/u.cm**2/u.s
 FLUEN_U = 1e-6*u.erg/u.cm**2
@@ -1771,6 +1783,229 @@ class Observations(Minbar):
             self.selection = sel_old
 
         return fig
+
+
+class Burst(ObservedBurst):
+    """
+    This object is intended to allow all the possible actions you might have on a
+    burst (i.e. a set of data including time-resolved spectroscopy, covering a burst).
+    You can create it from a minbar entry, or given an instrument, source name, obs ID
+    and some other identifier (time)?
+
+    Built on ObservedBurst, and so requires concord; some parameters are not provided
+    by that class, including
+
+    | bstart –burst start time
+    """
+
+
+    def __init__(self, entry=None, obs=None, burst_num=0, bstart=None, analyse=True):
+        """
+        Create a burst instance, either from a MINBAR Bursts entry, or by-hand from an Observation
+        Ideally this object should make available every parameter in the MINBAR burst table
+
+        For the purposes of adding new data to MINBAR, we also define an analysis level, as
+        follows (copied from the Observation class):
+
+        | level = 0 # no analysis products (known to be) present
+        | level = 1 # raw analysis/reduction steps have been completed but no lightcurves or spectra yet created
+        | level = 2 # lightcurve(s) are available
+        | level = 3 # burst data (time-resolved spectra) have been generated
+        | level = 4 # time-resolved spectral fits are available
+        | level = 5 # persistent spectra are available (from parent obsID)
+        | level = 9 # defined from a MINBAR observation entry, may not be any raw data available
+
+        Example usage:
+
+        | import minbar
+        | b = minbar.Bursts()
+        | burst = minbar.Burst(b[2202])
+
+        :param entry: single entry in the :class:`minbar.Bursts` table, to create the object from (in which case the other parameters are not required)
+        :param obs: Observation object specifying the host observation, path to data etc.
+        :param burst_num: identifier for the burst, index among the observation data set
+        :param analyse: set to false to skip any automated analysis that might otherwise be performed
+
+        :returns: None
+        """
+
+        if not (HAS_CONCORD):
+            logger.error('Burst class requires concord')
+            return
+
+        if (entry is None) and (obs is None):
+            logger.error('need to supply entry or host Observation (and burst_num)')
+            return
+
+        self.level = 0    # "analysis level"
+
+        if entry is not None:
+            logger.error('initialisation from MINBAR burst not yet implemented')
+
+        elif obs.instr.label in MINBAR_INSTR_LABEL:
+            # this is a MINBAR instrument, even if it's an observation that's not in MINBAR
+            # TODO check here if the observation exists in MINBAR, and assign an obsid etc. if it is
+            logger.error('PCA/WFC/JEM-X burst not from MINBAR, not yet implemented (sorry)')
+            return
+        else:
+            # this burst isn't in MINBAR, so it has no entry
+            self.entry = None
+
+            self.obs = obs
+            self.instr = obs.instr
+
+            self.name = obs.name
+            self.obsid = obs.obsid
+            self.burst_num = burst_num
+
+            if bstart is not None:
+                self.bstart = bstart
+            else:
+                logger.error('time determination from obsid and burst_num not yet implemented (sorry)')
+                return
+
+            # Custom paths here
+
+            if self.obs.path is not None:
+                # think it's more likely that you'd just specify the whole path here
+                # self.path = '/'.join((path, obsid))
+                if not os.path.isdir(self.obs.path):
+                    logger.error('path does not exist')
+                    return
+            elif hasattr(self.instr,'source_path'):
+                # nothing to do here as we get the path from the instrument via get_path
+                pass
+            else:
+                logger.warning('no path supplied and can''t get path from Observation instrument')
+
+            # special here for EP
+            self.filename = '/'.join((self.obs.path, 'Time_resolve_result', 'single_png', self.obsid,
+                                      'Par_{:011s}.txt'.format(self.obsid)))
+            _d = ascii.read(self.filename)
+
+            time0 = _d['col10'][0]
+            _time = (_d['col10']-time0)*86400.
+            if not np.allclose(self.bstart, time0+60851., atol=0.000115): # check if correct to within 10 s
+                logger.warning('start time mismatch, {:.5f} != {:.5f}'.format(self.bstart, time0+60851.))
+            self.bstart = time0+60851. # overwritten by the time array; need a different label for the start time
+            _dt = (_d['col11']-_d['col10'])*86400.
+            _flux = _d['col8']
+            # dummy arrays
+            self.flux_min, self.flux_max = np.zeros(len(_flux)), np.zeros(len(_flux))
+            self.count, self.count_err = np.zeros(len(_flux)), np.zeros(len(_flux))
+            self.raw_flux = np.zeros(len(_flux))
+            self.nH, self.nH_min, self.nH_max = np.zeros(len(_flux)), np.zeros(len(_flux)), np.zeros(len(_flux))
+            # more dummys here for consistency
+            self.chisq = np.zeros(len(_flux))
+            self.dof = np.zeros(len(_flux))
+
+            # define the files by which we can specify the burst data here
+            self.path = '/'.join((self.obs.path, 'Time_resolve_spec', self.obsid))
+            self.bin_file = ['burst_{}_w.xcm'.format(x.split('_')[1]) for x in _d['col1']]
+
+            self.level = 3
+
+            # Need to be careful with the units here; the base Lightcurve class will correctly apply
+            # units to time and flux, but not to other parameters
+            ObservedBurst.__init__(self, _time, _dt, _flux, np.zeros(len(_flux)), # <- error on flux
+                                   timepixr=0,
+                                   kT=_d['col2'], kT_min=_d['col3'], kT_max=_d['col4'],
+                                   rad=_d['col5'], rad_min=_d['col6'], rad_max=_d['col7'])
+
+
+    def __str__(self):
+        """
+        Return a nice string.
+        """
+
+        output = "Burst from {}{}\nInstrument: {}\nObsID: {}\nTime: MJD {} (#{})".format(
+            self.name,
+            ' (MINBAR {}#{})'.format('DR1 ' if self.entry <= 277779 else '',self.entry) if self.entry is not None else '',
+            self.instr.name, self.obsid, self.time, self.burst_num)
+        # if hasattr(self,'tstart') & hasattr(self,'tstop'):
+        #     output += "\nTime range: MJD {}-{}".format(self.tstart.value, self.tstop)
+        _path = self.obs.get_path()
+        if _path is not None:
+            output += "\nData path: {}".format(_path)
+
+        return output
+
+
+    def fit_time_resolved_spectra(self, savefile=True):
+        """
+        Preliminary routine to (re-)analyse a burst object
+
+        :param save: set to False to skip the file save
+        :return:
+        """
+
+        import inspect
+
+        _name = inspect.currentframe().f_code.co_name
+
+        # Note this flux definition conflicts (I think) with the concord flux units
+        _fu = u.erg/u.cm**2/u.s
+        for i, file in enumerate(self.bin_file):
+            _res = bspectra_fit(file, self.path)
+            self.chisq[i] = _res[8]/_res[9]
+            self.dof[i] = _res[9]
+            # maybe also need to redefine e_kT, E_kT etc.
+            self.count[i], self.count_err[i] = _res[0], _res[1]
+            self.nH[i], self.nH_min[i], self.nH_max[i] = _res[2], _res[3][0], _res[3][1]
+            self.kT[i], self.kT_min[i], self.kT_max[i] = _res[4]*u.keV, _res[5][0], _res[5][1]
+            self.rad[i], self.rad_min[i], self.rad_max[i] = _res[6], _res[7][0], _res[7][1]
+            self.raw_flux[i] = _res[10]
+            self.flux[i], self.flux_min[i], self.flux_max[i] = _res[11]*_fu, _res[12][0], _res[12][1]
+
+        # here we use the handy routines from concord
+        self.set_error('kT', {'kT_min': self.kT_min*u.keV, 'kT_max': self.kT_max*u.keV})
+        self.set_error('rad', {'rad_min': self.rad_min, 'rad_max': self.rad_max})
+        self.set_error('flux', {'flux_min': self.flux_min*_fu, 'flux_max': self.flux_max*_fu})
+
+        self.good = np.where((self.e_flux < self.flux) & (self.e_flux > 0))[0]
+
+        if savefile:
+            # write the spectral fit results to a file, same format as bbfit_fabs.log
+            # some omitted lines below
+            # PCARMF version v{}, HEASOFT version {}
+            #
+            # Source position RA , DEC 1.694740E+38
+            #
+            file = 'bbfit_fabs.txt'
+            if max(self.nH_max) > 0.0:
+                file = 'bbfit_vabs.txt'
+            head = """File {}
+Created {}
+{} v{} on host {}
+
+Burst directory
+  {}
+
+Columns:
+      1. Time (seconds relative to start time MJD {:.5f})
+      2,3. Count rate & error (not corrected for PCUs)
+      4. Time bin size (s)
+      5,6,7. nH (frozen in bbfit_fabs.log) and min, max (both zero in
+              bbfit_fabs.log)
+      8,9,10. kT (keV) and min, max (1 sigma error)
+      11,12,13. Blackbody normalisation ((R_km/d_10kpc)^2) and min,max
+      14. Fit reduced chi^2
+      15. "Raw" flux value (2.5-25 keV, 1e-9 ergs/cm^2/s)
+      16,17,18. Estimated bolometric flux (1e-9 ergs/cm^2/s) and 
+              min,max (1 sigma error)
+""".format(file, DATE, _name, VERSION, HOST, self.path, self.bstart)
+
+            save_path = '/'.join((self.path, MINBAR_ANALYSIS_PATH))
+            if not (os.path.isdir(save_path)):
+                os.makedirs(save_path)
+                logger.info('creating path {} for analysis products'.format(MINBAR_ANALYSIS_PATH))
+
+            with open('/'.join((save_path,file)), 'w') as f:
+                np.savetxt(f, np.stack((self.time.value, self.count, self.count_err, self.dt.value, self.nH, self.nH_min, self.nH_max,
+                               self.kT.value, self.kT_min.value, self.kT_max.value, self.rad.value, self.rad_min.value, self.rad_max.value,
+                               self.chisq, self.raw_flux*1e9, self.flux.value*1e9, self.flux_min*1e9, self.flux_max*1e9), axis=1),
+                           fmt='%7.4f', header=head)
+            logger.info('saving time-resolved spectroscopy to file {}'.format(file))
 
 
 class Observation:
