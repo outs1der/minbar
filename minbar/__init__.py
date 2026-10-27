@@ -24,7 +24,7 @@ Updated for MINBAR v0.9, 2017, Laurens Keek, laurens.keek@nasa.gov
 
 __author__ = """Laurens Keek and Duncan Galloway"""
 __email__ = 'duncan.galloway@monash.edu'
-__version__ = '1.38.0dev'
+__version__ = '1.39.0dev'
 
 from .idldatabase import IDLDatabase
 from .analyse import *
@@ -32,7 +32,7 @@ from .build import *
 from .burstplot import *
 import numpy as np
 import pandas as pd
-import os, re
+import os, re, glob
 from astropy.io import fits, ascii
 import astropy.units as u
 from astropy.time import Time
@@ -1799,7 +1799,7 @@ class Burst(ObservedBurst):
     """
 
 
-    def __init__(self, entry=None, obs=None, burst_num=0, bstart=None, analyse=True):
+    def __init__(self, entry=None, obs=None, burst_num=0, nH=None, bstart=None, analyse=True):
         """
         Create a burst instance, either from a MINBAR Bursts entry, or by-hand from an Observation
         Ideally this object should make available every parameter in the MINBAR burst table
@@ -1828,6 +1828,29 @@ class Burst(ObservedBurst):
 
         :returns: None
         """
+
+        def get_times_from_pha(file):
+            """
+            Extract the start and end times from a PHA file
+
+            :param file: file name to read in
+
+            :return: tuple with start, stop, exposure
+            """
+
+            os.chdir(self.path)
+            with fits.open(file) as hdul:
+                ext = 0
+
+                if not hasattr(self, 'timesys'):
+                    self.timesys = hdul[ext].header['TIMESYS']
+                if not hasattr(self, 'mjdref'):
+                    self.mjdref = hdul[ext].header['MJDREFI'] + hdul[ext].header['MJDREFF']
+
+                tstart, tstop, exposure = hdul[ext].header['TSTART'], hdul[ext].header['TSTOP'], hdul[ext].header['EXPOSURE']
+
+            return tstart, tstop, exposure
+
 
         if not (HAS_CONCORD):
             logger.error('Burst class requires concord')
@@ -1860,7 +1883,7 @@ class Burst(ObservedBurst):
 
             if bstart is not None:
                 self.bstart = bstart
-            else:
+            elif burst_num <= 0:
                 logger.error('time determination from obsid and burst_num not yet implemented (sorry)')
                 return
 
@@ -1878,18 +1901,93 @@ class Burst(ObservedBurst):
             else:
                 logger.warning('no path supplied and can''t get path from Observation instrument')
 
-            # special here for EP
-            self.filename = '/'.join((self.obs.path, 'Time_resolve_result', 'single_png', self.obsid,
-                                      'Par_{:011s}.txt'.format(self.obsid)))
-            _d = ascii.read(self.filename)
+            # define the burst data here.
+            # cases so far are:
+            # 1. bursts with existing results in a .csv file as well as spectra, with each bin defined by an .xcm file
+            # 2. bursts with no existing results and each bin defined by a pair of spectra (for each camera)
+            # distinguish these 2 cases based on the bin_file array (which should have a better name)
+            if self.instr.label == 'EP':
+                # special here for Einstein Probe (EP)
+                # code below developed for time-resolved results and spectra provided by Zhihan Yang <yangzh@ihep.ac.cn>
+                self.filename = '/'.join((self.obs.path, 'Time_resolve_result', 'single_png', self.obsid,
+                                          'Par_{:011s}.txt'.format(self.obsid)))
+                _d = ascii.read(self.filename)
 
-            time0 = _d['col10'][0]
-            _time = (_d['col10']-time0)*86400.
-            if not np.allclose(self.bstart, time0+60851., atol=0.000115): # check if correct to within 10 s
-                logger.warning('start time mismatch, {:.5f} != {:.5f}'.format(self.bstart, time0+60851.))
-            self.bstart = time0+60851. # overwritten by the time array; need a different label for the start time
-            _dt = (_d['col11']-_d['col10'])*86400.
-            _flux = _d['col8']
+                time0 = _d['col10'][0]
+                _time = (_d['col10']-time0)*86400.
+                if not np.allclose(self.bstart, time0+60851., atol=0.000115): # check if correct to within 10 s
+                    logger.warning('start time mismatch, {:.5f} != {:.5f}'.format(self.bstart, time0+60851.))
+                self.bstart = time0+60851. # overwritten by the time array; need a different label for the start time
+                _dt = (_d['col11']-_d['col10'])*86400.
+                _flux = _d['col8']
+
+                # define the files by which we can specify the burst data here
+                self.path = '/'.join((self.obs.path, 'Time_resolve_spec', self.obsid))
+                self.bin_file = ['burst_{}_w.xcm'.format(x.split('_')[1]) for x in _d['col1']]
+
+                self.level = 3
+
+                # Need to be careful with the units here; the base Lightcurve class will correctly apply
+                # units to time and flux, but not to other parameters
+                ObservedBurst.__init__(self, _time, _dt, _flux, np.zeros(len(_flux)), # <- error on flux
+                                       timepixr=0,
+                                       kT=_d['col2'], kT_min=_d['col3'], kT_max=_d['col4'],
+                                       rad=_d['col5'], rad_min=_d['col6'], rad_max=_d['col7'])
+
+            elif self.instr.label == 'NU':
+                # special here for NuSTAR (NU), with time-resolved spectra provided by Yilong Wang <wangyilong@nao.cas.cn>
+                # don't have any existing results in the set of data provided
+
+                self.burst_num = burst_num
+
+                # define the files by which we can specify the burst data here
+                # get_path() is used in place of path because the latter is not set if we're relying on the instr path
+                #   (that needs to be fixed)
+
+                self.path = '/'.join((self.obs.get_path(), 'burst{}'.format(self.burst_num)))
+                _spectra = glob.glob(self.path+'/burst_segm_*_?_sr_grp.pha')
+                if len(_spectra) == 0:
+                    logger.error('no spectral files found, can''t continue')
+                _spectra.sort()
+                _spectra = [os.path.basename(x) for x in _spectra]
+                self.bin_file = list(zip(_spectra[0::2], _spectra[1::2]))
+
+                # dummy values for all the parameters here, at least initially
+
+                self.filename = None
+                _time = np.zeros(len(self.bin_file))
+                _flux = np.zeros(len(self.bin_file))
+                _dt = np.zeros(len(self.bin_file))
+
+                for i, _file in enumerate(self.bin_file):
+                    if type(_file) == str:
+                        tstart, tstop, exposure = get_times_from_pha(_file)
+                    else:
+                        # tuple assumed
+                        tstart, tstop, exposure = get_times_from_pha(_file[0])
+                    _time[i] = tstart
+                    if not hasattr(self, 'bstart'):
+                        self.bstart = _time[i]
+                    _dt[i] = exposure
+
+                _time = _time-self.bstart
+                self.bstart = self.bstart/86400+self.mjdref
+
+                self.level = 1
+
+                # Need to be careful with the units here; the base Lightcurve class will correctly apply
+                # units to time and flux, but not to other parameters
+                ObservedBurst.__init__(self, _time, _dt, _flux, np.zeros(len(_flux)),  # <- error on flux
+                                       timepixr=0)
+
+                self.kT, self.kT_min, self.kT_max = np.zeros(len(_flux))*u.keV, np.zeros(len(_flux)), np.zeros(len(_flux))
+                self.rad, self.rad_min, self.rad_max = np.zeros(len(_flux)), np.zeros(len(_flux)), np.zeros(len(_flux))
+            else:
+                logger.error ('no rule yet to read burst data from {}, sorry'.format(self.instr.name))
+                return
+
+            self.nH_frozen = nH
+
             # dummy arrays
             self.flux_min, self.flux_max = np.zeros(len(_flux)), np.zeros(len(_flux))
             self.count, self.count_err = np.zeros(len(_flux)), np.zeros(len(_flux))
@@ -1899,18 +1997,6 @@ class Burst(ObservedBurst):
             self.chisq = np.zeros(len(_flux))
             self.dof = np.zeros(len(_flux))
 
-            # define the files by which we can specify the burst data here
-            self.path = '/'.join((self.obs.path, 'Time_resolve_spec', self.obsid))
-            self.bin_file = ['burst_{}_w.xcm'.format(x.split('_')[1]) for x in _d['col1']]
-
-            self.level = 3
-
-            # Need to be careful with the units here; the base Lightcurve class will correctly apply
-            # units to time and flux, but not to other parameters
-            ObservedBurst.__init__(self, _time, _dt, _flux, np.zeros(len(_flux)), # <- error on flux
-                                   timepixr=0,
-                                   kT=_d['col2'], kT_min=_d['col3'], kT_max=_d['col4'],
-                                   rad=_d['col5'], rad_min=_d['col6'], rad_max=_d['col7'])
 
 
     def __str__(self):
@@ -1918,10 +2004,11 @@ class Burst(ObservedBurst):
         Return a nice string.
         """
 
-        output = "Burst from {}{}\nInstrument: {}\nObsID: {}\nTime: MJD {} (#{})".format(
+        output = "Burst from {}{}\nInstrument: {}\nObsID: {}{}{}".format(
             self.name,
             ' (MINBAR {}#{})'.format('DR1 ' if self.entry <= 277779 else '',self.entry) if self.entry is not None else '',
-            self.instr.name, self.obsid, self.time, self.burst_num)
+            self.instr.name, self.obsid, ' (#{})'.format(self.burst_num) if self.burst_num else '',
+            '\nTime: MJD {:.5f}'.format(self.bstart) if self.bstart is not None else '')
         # if hasattr(self,'tstart') & hasattr(self,'tstop'):
         #     output += "\nTime range: MJD {}-{}".format(self.tstart.value, self.tstop)
         _path = self.obs.get_path()
@@ -1946,7 +2033,7 @@ class Burst(ObservedBurst):
         # Note this flux definition conflicts (I think) with the concord flux units
         _fu = u.erg/u.cm**2/u.s
         for i, file in enumerate(self.bin_file):
-            _res = bspectra_fit(file, self.path)
+            _res = bspectra_fit(file, self.path, nH=self.nH_frozen)
             self.chisq[i] = _res[8]/_res[9]
             self.dof[i] = _res[9]
             # maybe also need to redefine e_kT, E_kT etc.
@@ -1964,6 +2051,18 @@ class Burst(ObservedBurst):
 
         self.good = np.where((self.e_flux < self.flux) & (self.e_flux > 0))[0]
 
+        # refine start time
+        _itest = min(np.where(self.flux > 0.25*max(self.flux))[0])
+        if self.time[_itest] != 0.0:
+            logger.info('adjusting burst time based on first bin with 0.25*maximum flux')
+            self.bstart += self.time[_itest].to('d').value
+            self.time -= self.time[_itest]
+
+        # and finally convert to UTC
+        if self.timesys.upper() != 'UTC':
+            self.bstart = Time(self.bstart, format='mjd', scale=self.timesys.lower()).utc.mjd
+            self.timesys = 'UTC'
+
         if savefile:
             # write the spectral fit results to a file, same format as bbfit_fabs.log
             # some omitted lines below
@@ -1974,6 +2073,7 @@ class Burst(ObservedBurst):
             file = 'bbfit_fabs.txt'
             if max(self.nH_max) > 0.0:
                 file = 'bbfit_vabs.txt'
+
             head = """File {}
 Created {}
 {} v{} on host {}
@@ -1982,7 +2082,7 @@ Burst directory
   {}
 
 Columns:
-      1. Time (seconds relative to start time MJD {:.5f})
+      1. Time (seconds relative to start time {})
       2,3. Count rate & error (not corrected for PCUs)
       4. Time bin size (s)
       5,6,7. nH (frozen in bbfit_fabs.log) and min, max (both zero in
@@ -1993,16 +2093,19 @@ Columns:
       15. "Raw" flux value (2.5-25 keV, 1e-9 ergs/cm^2/s)
       16,17,18. Estimated bolometric flux (1e-9 ergs/cm^2/s) and 
               min,max (1 sigma error)
-""".format(file, DATE, _name, VERSION, HOST, self.path, self.bstart)
+""".format(file, DATE, _name, VERSION, HOST, self.path,
+           'MJD {:.5f} {}'.format(self.bstart, self.timesys) if self.bstart is not None else 'unknown')
 
             save_path = '/'.join((self.path, MINBAR_ANALYSIS_PATH))
             if not (os.path.isdir(save_path)):
                 os.makedirs(save_path)
                 logger.info('creating path {} for analysis products'.format(MINBAR_ANALYSIS_PATH))
 
+            # TODO need to reconcile savetxt expression below with unit conventions for arrays;
+            #  at the moment it's a bit of a mess, e.g. with kT having a unit but the limits not
             with open('/'.join((save_path,file)), 'w') as f:
                 np.savetxt(f, np.stack((self.time.value, self.count, self.count_err, self.dt.value, self.nH, self.nH_min, self.nH_max,
-                               self.kT.value, self.kT_min.value, self.kT_max.value, self.rad.value, self.rad_min.value, self.rad_max.value,
+                               self.kT.value, self.kT_min, self.kT_max, self.rad, self.rad_min, self.rad_max,
                                self.chisq, self.raw_flux*1e9, self.flux.value*1e9, self.flux_min*1e9, self.flux_max*1e9), axis=1),
                            fmt='%7.4f', header=head)
             logger.info('saving time-resolved spectroscopy to file {}'.format(file))
@@ -2111,7 +2214,7 @@ class Observation:
                 return
         elif hasattr(instr,'source_path'):
             # nothing to do here as we get the path from the instrument via get_path
-            pass
+            self.path = self.get_path()
         else:
             logger.warning('no path supplied and can''t get path from instrument')
 

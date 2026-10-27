@@ -1785,15 +1785,17 @@ Columns:
     return True # assuming no errors
 
 
-def bspectra_fit(file, path=None, nH=None, limits=(2.5, 20), steppar_grid=50, errfac=2., del_chi=2.28):
+def bspectra_fit(file, path=None,
+                 nH=None, limits=(2.5, 20),
+                 steppar_grid=50, errfac=2., del_chi=2.28, plot=False):
     """
-    Routine to fit a blackbody model to a single spectrum, and return the parameter
-    centroid and limits, and the flux centroid and limits.
+    Routine to fit a blackbody model to one or more spectra for sa single time bin, and i
+    return the parameter centroid and limits, and the flux centroid and limits.
 
     Some of the parameters of interest are not yet available to be captured, for example
     the count rate and uncertainty
 
-    :param file: spectral file name to read in, or .xcm file to load the spectral data
+    :param file: spectral file name to read in, or tuple with multiple files, or .xcm file to load the spectral data
     :param path: path to spectral/xcm file
     :param nH: neutral absorption to adopt (and freeze)
     :param limits: energy limits between which the fit will be performed (keV)
@@ -1806,6 +1808,9 @@ def bspectra_fit(file, path=None, nH=None, limits=(2.5, 20), steppar_grid=50, er
 
     # don't currently have a way to determine these easily
     count, count_err = 0.0, 0.0
+
+    # don't know why this is necessary
+    from xspec import AllData
 
     def bbodyrad_flux(norm, kt):
         """
@@ -1820,22 +1825,25 @@ def bspectra_fit(file, path=None, nH=None, limits=(2.5, 20), steppar_grid=50, er
 
     # steppar commands will hang, unless you run
     Xset.chatter = 0
-    AllData.clear()
-    AllModels.clear()
+    try:
+        AllData.clear()
+        AllModels.clear()
+    except:
+        pass
 
-    if path is None:
-        # check for integrated path-and-file here
-        path, file = os.path.split(file)
-    path_and_file = '/'.join((path, file))
+    ext = None
+    if (type(file) == str):
+        if (path is None):
+            # check for integrated path-and-file here
+            path, file = os.path.split(file)
+        fileonly, ext = os.path.splitext(file)
 
-    if not os.path.isfile(path_and_file):
-        minbar.logger.error('file {} not found'.format(path_and_file))
-        return
-
-    fileonly, ext = os.path.splitext(file)
     _saved_dir = os.getcwd()
-    if ext == '.pha':
-        # PHA file supplied, need to define model
+    if (path is not None) & (path != ''):
+        os.chdir(path)
+
+    if (type(file) == tuple) | (ext == '.pha'):
+        # PHA file(s) supplied, need to define model
         bbody = Model("tbabs * bbodyrad", \
                       setPars={1: nH or 1.0, 2: 1.0, 3: 100})
 
@@ -1849,15 +1857,19 @@ def bspectra_fit(file, path=None, nH=None, limits=(2.5, 20), steppar_grid=50, er
         bbrad_kT = bbody(2)
         bbrad_norm = bbody(3)
 
-        s = Spectrum(path_and_file)
+        # load spectra
+        if type(file) == str:
+            AllData += file
+        else:
+            for _file in file:
+                print (_file)
+                AllData += _file
         if limits is not None:
-            s.ignore("**-{:.1f} {:.1f}-**".format(limits[0], limits[1]))
+            AllData.ignore("**-{:.1f} {:.1f}-**".format(limits[0], limits[1]))
         AllData.ignore("bad")
 
     elif ext == '.xcm':
         # .xcm file supplied, assume data and model all read in
-        if path != '':
-            os.chdir(path)
         Xset.restore(file)
         # assumes a tbabs*bbodyrad model
         bbrad_nH = AllModels(1).TBabs.nH
@@ -1914,6 +1926,10 @@ def bspectra_fit(file, path=None, nH=None, limits=(2.5, 20), steppar_grid=50, er
     # delchi^2 from bspectra_fit_v12.perl, 1-sigma for 2 parameters
     lt1sig = np.array(steppar_res) < cmin + del_chi
     fmin, fmax = min(steppar_flux[lt1sig]), max(steppar_flux[lt1sig])
+
+    # TODO add the plot
+    if plot:
+        logger.error('plotting not yet implemented')
 
     AllData.clear()
     AllModels.clear()
