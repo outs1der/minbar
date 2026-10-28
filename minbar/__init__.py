@@ -1918,6 +1918,7 @@ class Burst(ObservedBurst):
                 if not np.allclose(self.bstart, time0+60851., atol=0.000115): # check if correct to within 10 s
                     logger.warning('start time mismatch, {:.5f} != {:.5f}'.format(self.bstart, time0+60851.))
                 self.bstart = time0+60851. # overwritten by the time array; need a different label for the start time
+                self.timesys = 'UTC' # assumed!
                 _dt = (_d['col11']-_d['col10'])*86400.
                 _flux = _d['col8']
 
@@ -1931,8 +1932,8 @@ class Burst(ObservedBurst):
                 # units to time and flux, but not to other parameters
                 ObservedBurst.__init__(self, _time, _dt, _flux, np.zeros(len(_flux)), # <- error on flux
                                        timepixr=0,
-                                       kT=_d['col2'], kT_min=_d['col3'], kT_max=_d['col4'],
-                                       rad=_d['col5'], rad_min=_d['col6'], rad_max=_d['col7'])
+                                       kT=_d['col2'].value, kT_min=_d['col3'].value, kT_max=_d['col4'].value,
+                                       rad=_d['col5'].value, rad_min=_d['col6'].value, rad_max=_d['col7'].value)
 
             elif self.instr.label == 'NU':
                 # special here for NuSTAR (NU), with time-resolved spectra provided by Yilong Wang <wangyilong@nao.cas.cn>
@@ -1980,8 +1981,10 @@ class Burst(ObservedBurst):
                 ObservedBurst.__init__(self, _time, _dt, _flux, np.zeros(len(_flux)),  # <- error on flux
                                        timepixr=0)
 
+                # this next step is pretty risky because you have to match the treatment of ObservedBurst for the
+                # various columns, otherwise things will break
                 self.kT, self.kT_min, self.kT_max = np.zeros(len(_flux))*u.keV, np.zeros(len(_flux)), np.zeros(len(_flux))
-                self.rad, self.rad_min, self.rad_max = np.zeros(len(_flux)), np.zeros(len(_flux)), np.zeros(len(_flux))
+                self.rad, self.rad_min, self.rad_max = np.zeros(len(_flux))*u.dimensionless_unscaled, np.zeros(len(_flux)), np.zeros(len(_flux))
             else:
                 logger.error ('no rule yet to read burst data from {}, sorry'.format(self.instr.name))
                 return
@@ -2030,10 +2033,15 @@ class Burst(ObservedBurst):
 
         _name = inspect.currentframe().f_code.co_name
 
+        save_path = '/'.join((self.path, MINBAR_ANALYSIS_PATH))
+        if savefile & (not (os.path.isdir(save_path))):
+            os.makedirs(save_path)
+            logger.info('creating path {} for analysis products'.format(MINBAR_ANALYSIS_PATH))
+
         # Note this flux definition conflicts (I think) with the concord flux units
         _fu = u.erg/u.cm**2/u.s
         for i, file in enumerate(self.bin_file):
-            _res = bspectra_fit(file, self.path, nH=self.nH_frozen)
+            _res = bspectra_fit(file, self.path, nH=self.nH_frozen, fit_plot_save=(savefile != False))
             self.chisq[i] = _res[8]/_res[9]
             self.dof[i] = _res[9]
             # maybe also need to redefine e_kT, E_kT etc.
@@ -2096,16 +2104,12 @@ Columns:
 """.format(file, DATE, _name, VERSION, HOST, self.path,
            'MJD {:.5f} {}'.format(self.bstart, self.timesys) if self.bstart is not None else 'unknown')
 
-            save_path = '/'.join((self.path, MINBAR_ANALYSIS_PATH))
-            if not (os.path.isdir(save_path)):
-                os.makedirs(save_path)
-                logger.info('creating path {} for analysis products'.format(MINBAR_ANALYSIS_PATH))
-
             # TODO need to reconcile savetxt expression below with unit conventions for arrays;
             #  at the moment it's a bit of a mess, e.g. with kT having a unit but the limits not
+            breakpoint()
             with open('/'.join((save_path,file)), 'w') as f:
                 np.savetxt(f, np.stack((self.time.value, self.count, self.count_err, self.dt.value, self.nH, self.nH_min, self.nH_max,
-                               self.kT.value, self.kT_min, self.kT_max, self.rad, self.rad_min, self.rad_max,
+                               self.kT.value, self.kT_min, self.kT_max, self.rad.value, self.rad_min, self.rad_max,
                                self.chisq, self.raw_flux*1e9, self.flux.value*1e9, self.flux_min*1e9, self.flux_max*1e9), axis=1),
                            fmt='%7.4f', header=head)
             logger.info('saving time-resolved spectroscopy to file {}'.format(file))

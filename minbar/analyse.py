@@ -1787,7 +1787,8 @@ Columns:
 
 def bspectra_fit(file, path=None,
                  nH=None, limits=(2.5, 20),
-                 steppar_grid=50, errfac=2., del_chi=2.28, plot=False):
+                 steppar_grid=50, errfac=2., del_chi=2.28, plot=False,
+                 fit_plot_save=True, clobber=False):
     """
     Routine to fit a blackbody model to one or more spectra for sa single time bin, and i
     return the parameter centroid and limits, and the flux centroid and limits.
@@ -1802,6 +1803,9 @@ def bspectra_fit(file, path=None,
     :param steppar_grid: size of the steppar grid to run (each of 2 dimensions)
     :param errfac: factor to inflate the errors on kT, norm, to cover in the grid
     :param del_chi: delta-chi^2 for parameters, normally 1-sigma for 2 params
+    :param plot: plot the fit result (interactive mode)
+    :param plot_save: save the plot (non-interactive mode)
+    :param clobber: overwrite existing plot/parameter files
 
     :returns: tuple with count, count_err, best kT, (lower, upper error), best norm, (lower, upper error), min-chi^2, nDOF, raw (band-limited) flux, (lower, upper error), num. steppar grid points within target chi^2 contour
     """
@@ -1832,7 +1836,9 @@ def bspectra_fit(file, path=None,
         pass
 
     ext = None
+    single_file = False
     if (type(file) == str):
+        single_file = True
         if (path is None):
             # check for integrated path-and-file here
             path, file = os.path.split(file)
@@ -1842,8 +1848,8 @@ def bspectra_fit(file, path=None,
     if (path is not None) & (path != ''):
         os.chdir(path)
 
-    if (type(file) == tuple) | (ext == '.pha'):
-        # PHA file(s) supplied, need to define model
+    if (not single_file) | (ext == '.pha'):
+        # PHA file(s) supplied, need to define model (assumed to be part of the .xcm file if passed)
         bbody = Model("tbabs * bbodyrad", \
                       setPars={1: nH or 1.0, 2: 1.0, 3: 100})
 
@@ -1858,17 +1864,17 @@ def bspectra_fit(file, path=None,
         bbrad_norm = bbody(3)
 
         # load spectra
-        if type(file) == str:
+        if single_file:
             AllData += file
         else:
             for _file in file:
-                print (_file)
+                # print (_file)
                 AllData += _file
         if limits is not None:
             AllData.ignore("**-{:.1f} {:.1f}-**".format(limits[0], limits[1]))
         AllData.ignore("bad")
 
-    elif ext == '.xcm':
+    elif (ext == '.xcm'):
         # .xcm file supplied, assume data and model all read in
         Xset.restore(file)
         # assumes a tbabs*bbodyrad model
@@ -1930,6 +1936,24 @@ def bspectra_fit(file, path=None,
     # TODO add the plot
     if plot:
         logger.error('plotting not yet implemented')
+
+    if fit_plot_save:
+        # generate the fit plot and save
+        Plot.device = "/cps"
+        Plot.xAxis = "keV"
+        Plot.addCommand('la t ' + (file if  single_file else ('+'.join(file))
+                                   + "; nH frozen @ {}".format(nH) if nH is not None else ""))
+        Plot("ldata", "chisq")
+
+        Plot.device = "/null"
+
+        if single_file:
+            plot_out = fileonly
+        else:
+            # use the common parts of the 2 (or more) files as the file prefix
+            plot_out = file[0][:(max(np.where([(file[0][:i] == file[1][:i]) & (file[0][i-1:i] != '_')
+                                               for i in np.arange(min([len(x) for x in file]))])[0]))]
+        os.system('ps2pdf pgplot.ps minbar/{}.pdf'.format(plot_out))
 
     AllData.clear()
     AllModels.clear()
